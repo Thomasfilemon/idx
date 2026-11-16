@@ -1,0 +1,58 @@
+name: Stock Data Smoke Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [development]
+    paths:
+      - '.github/workflows/stock-smoke-test.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stock-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live-market-data:
+    name: Build Rust CLI and fetch sample stock data
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release --locked
+      - name: Fetch live provider data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-results
+          ./target/release/idx -o json stocks quote BBCA > smoke-results/bbca.json
+          ./target/release/idx -o json stocks quote BBRI > smoke-results/bbri.json
+          ./target/release/idx -o json stocks history TLKM --period 1mo > smoke-results/tlkm-history.json
+      - name: Validate JSON results
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          for path in sorted(Path("smoke-results").glob("*.json")):
+              payload = json.loads(path.read_text())
+              if not isinstance(payload, (dict, list)) or not payload:
+                  raise ValueError(f"{path}: empty or unexpected JSON payload")
+              if isinstance(payload, dict) and payload.get("error"):
+                  raise ValueError(f"{path}: provider error: {payload['error']}")
+              print(f"OK: {path}")
+          PY
+      - name: Upload result JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stock-smoke-results
+          path: smoke-results/
+          if-no-files-found: warn
+          retention-days: 7
