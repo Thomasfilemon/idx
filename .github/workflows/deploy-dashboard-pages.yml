@@ -1,0 +1,54 @@
+name: Deploy IDX Dashboard Preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [development]
+    paths:
+      - 'web/public/dashboard.html'
+      - 'web/public/dashboard.css'
+      - 'web/public/dashboard.js'
+      - '.github/workflows/deploy-dashboard-pages.yml'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-dashboard
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Publish mobile dashboard
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout development
+        uses: actions/checkout@v4
+      - name: Prepare static site
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          cp web/public/dashboard.html _site/index.html
+          cp web/public/dashboard.css _site/dashboard.css
+          cp web/public/dashboard.js _site/dashboard.js
+          touch _site/.nojekyll
+          test -s _site/index.html
+          test -s _site/dashboard.css
+          test -s _site/dashboard.js
+          grep -q 'href="./dashboard.css"' _site/index.html
+          grep -q 'src="./dashboard.js"' _site/index.html
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
