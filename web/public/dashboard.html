@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1220"><title>IDX · Stock Dashboard</title><link rel="stylesheet" href="/dashboard.css" defer></head>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b1220"><title>IDX · Stock Dashboard</title><link rel="stylesheet" href="./dashboard.css"></head>
 <body><main class="shell"><header><div class="brand"><span class="brandmark">↗</span><span>IDX <strong>Dashboard</strong></span></div><span class="pill">Prototype</span></header>
 <section class="intro"><p class="eyebrow">INDONESIA STOCK EXCHANGE</p><h1>Market at a glance.</h1><p>Watchlist saham Indonesia, dirancang untuk layar mobile.</p></section>
 <section class="hero"><div class="hero-top"><div><p class="eyebrow">IHSG · ^JKSE</p><div id="ihsg" class="hero-number">—</div><div id="ihsg-change" class="delta">Belum ada data</div></div><span id="mode" class="mode">Demo data</span></div><div class="hero-bottom"><span id="market-status">Market status belum tersedia</span><span id="updated">—</span></div></section>
@@ -9,4 +9,4 @@
 <div id="stocks" class="stocks" aria-live="polite"></div>
 <section class="detail"><div class="section-head"><h2 id="detail-title">Detail saham</h2><span id="detail-source" class="muted">Sample</span></div><p id="detail-name" class="muted"></p><div class="detail-grid"><div><span>Harga</span><strong id="detail-price">—</strong></div><div><span>Perubahan</span><strong id="detail-change">—</strong></div><div><span>Volume</span><strong id="detail-volume">—</strong></div><div><span>Market time</span><strong id="detail-time">—</strong></div></div><p class="footnote">Harga dapat tertunda. Selalu cek market timestamp dan sumber data sebelum mengambil keputusan investasi.</p></section>
 <footer><span>Data mode</span><div class="toggle"><button id="demo" class="active" type="button">Demo</button><button id="live" type="button">Live API</button></div><p>Live API memakai endpoint <code>/api/market</code> dan <code>/api/quote</code> dari backend web IDX yang sudah ada. Agar bekerja, dashboard harus disajikan dari host yang sama dengan API.</p></footer>
-</main><script type="module" src="/dashboard.js"></script></body></html>
+</main><script type="module" src="./dashboard.js"></script></body></html>
