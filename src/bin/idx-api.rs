@@ -38,7 +38,10 @@ fn parse_symbols(raw: Option<&str>) -> Result<Vec<Symbol>, &'static str> {
 }
 
 fn error(status: StatusCode, code: &str, message: &str) -> (StatusCode, Json<Value>) {
-    (status, Json(json!({ "error": { "code": code, "message": message } })))
+    (
+        status,
+        Json(json!({ "error": { "code": code, "message": message } })),
+    )
 }
 
 async fn health() -> Json<Value> {
@@ -51,11 +54,21 @@ async fn quote(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let symbols = parse_symbols(query.symbols.as_deref())
         .map_err(|msg| error(StatusCode::BAD_REQUEST, "usage", msg))?;
-    let result = state.provider.quotes(&symbols).await
-        .map_err(|_| error(StatusCode::BAD_GATEWAY, "provider", "quote provider unavailable"))?;
+    let result = state.provider.quotes(&symbols).await.map_err(|_| {
+        error(
+            StatusCode::BAD_GATEWAY,
+            "provider",
+            "quote provider unavailable",
+        )
+    })?;
     let envelope = Envelope::from_sourced(SCHEMA_QUOTES, result);
-    let body = serde_json::to_value(envelope)
-        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "internal", "serialization failed"))?;
+    let body = serde_json::to_value(envelope).map_err(|_| {
+        error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            "serialization failed",
+        )
+    })?;
     Ok(Json(body))
 }
 
@@ -96,18 +109,29 @@ mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
     use http_body_util::BodyExt;
-    use idx::{error::IdxError, model::{History, Interval, Period, Quote}, providers::Sourced};
+    use idx::{
+        error::IdxError,
+        model::{History, Interval, Period, Quote},
+        providers::Sourced,
+    };
     use tower::ServiceExt;
 
     struct OfflineProvider;
 
     #[async_trait::async_trait]
     impl Provider for OfflineProvider {
-        fn name(&self) -> &'static str { "fixture" }
+        fn name(&self) -> &'static str {
+            "fixture"
+        }
         async fn quotes(&self, _: &[Symbol]) -> idx::Result<Sourced<Vec<Quote>>> {
             Err(IdxError::NotFound("fixture has no quotes".into()))
         }
-        async fn history(&self, _: &Symbol, _: Period, _: Interval) -> idx::Result<Sourced<History>> {
+        async fn history(
+            &self,
+            _: &Symbol,
+            _: Period,
+            _: Interval,
+        ) -> idx::Result<Sourced<History>> {
             Err(IdxError::NotFound("fixture has no history".into()))
         }
         async fn fundamentals(&self, _: &Symbol) -> idx::Result<Sourced<idx::model::Fundamentals>> {
@@ -118,7 +142,8 @@ mod tests {
     async fn call(uri: &str) -> (StatusCode, Value) {
         let response = router(Arc::new(OfflineProvider))
             .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
-            .await.unwrap();
+            .await
+            .unwrap();
         let status = response.status();
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         (status, serde_json::from_slice(&bytes).unwrap())
@@ -133,7 +158,11 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_queries_do_not_hit_provider() {
-        for uri in ["/api/quote", "/api/quote?symbols=", "/api/quote?symbols=BBCA,"] {
+        for uri in [
+            "/api/quote",
+            "/api/quote?symbols=",
+            "/api/quote?symbols=BBCA,",
+        ] {
             let (status, body) = call(uri).await;
             assert_eq!(status, StatusCode::BAD_REQUEST);
             assert_eq!(body["error"]["code"], "usage");
