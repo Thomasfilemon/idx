@@ -60,6 +60,9 @@ test("Worker responses carry the same security headers", async () => {
 // (a form is fine: the terminal handles submit in JS, form-action only stops
 // a real submission).
 const STYLE_HOSTS = ["https://fonts.googleapis.com/"];
+// Root-relative and dot-relative URLs stay on this origin. GitHub Pages project
+// sites need dot-relative assets because they live below /<repo>/.
+const localAsset = (url) => /^(?:\/(?!\/)|\.\/(?!\/))[^?#]+$/.test(url);
 
 function cspProblems(html) {
   const problems = [];
@@ -68,16 +71,16 @@ function cspProblems(html) {
     if (/type="application\/ld\+json"/.test(attrs)) continue;
     const src = attrs.match(/\bsrc="([^"]*)"/)?.[1];
     if (!src) problems.push("inline script");
-    else if (!src.startsWith("/") || src.startsWith("//")) problems.push(`script from ${src}`);
+    else if (!localAsset(src)) problems.push(`script from ${src}`);
   }
   for (const m of html.matchAll(/<[a-z][^>]*\s(on[a-z]+)=/gi)) problems.push(`inline handler ${m[1]}`);
   if (/href="javascript:/i.test(html)) problems.push("javascript: URL");
   for (const m of html.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*>/gi)) {
     const href = m[0].match(/\bhref="([^"]*)"/)?.[1] ?? "";
-    if (!(href.startsWith("/") && !href.startsWith("//")) && !STYLE_HOSTS.some((h) => href.startsWith(h))) problems.push(`stylesheet from ${href}`);
+    if (!localAsset(href) && !STYLE_HOSTS.some((h) => href.startsWith(h))) problems.push(`stylesheet from ${href}`);
   }
   for (const m of html.matchAll(/<(?:img|source|video|audio|embed|object)\b[^>]*\b(?:src|srcset|data)="([^"]*)"/gi)) {
-    if (!(m[1].startsWith("/") && !m[1].startsWith("//")) && !m[1].startsWith("data:")) problems.push(`media from ${m[1]}`);
+    if (!localAsset(m[1]) && !m[1].startsWith("data:")) problems.push(`media from ${m[1]}`);
   }
   return problems;
 }
@@ -86,4 +89,11 @@ test("every page in public/ works under the CSP", () => {
   const pages = readdirSync(pub).filter((f) => f.endsWith(".html"));
   assert.ok(pages.length >= 3);
   for (const page of pages) assert.deepEqual(cspProblems(readFileSync(join(pub, page), "utf8")), [], page);
+});
+
+// A project-site asset is safe, but a network-path URL or foreign host is not.
+test("CSP asset validator permits same-origin relative paths only", () => {
+  assert.deepEqual(cspProblems('<script src="./dashboard.js"></script><link rel="stylesheet" href="./dashboard.css">'), []);
+  assert.deepEqual(cspProblems('<script src="//evil.example/app.js"></script>'), ["script from //evil.example/app.js"]);
+  assert.deepEqual(cspProblems('<link rel="stylesheet" href="https://evil.example/app.css">'), ["stylesheet from https://evil.example/app.css"]);
 });
