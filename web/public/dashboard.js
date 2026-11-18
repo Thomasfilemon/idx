@@ -1,3 +1,5 @@
+const apiBase = document.querySelector('meta[name="idx-api-base"]')?.content.trim().replace(/\/+$/, "") || "";
+let loadId = 0;
 const $ = (id) => document.getElementById(id);
 const fmt = new Intl.NumberFormat("id-ID", {maximumFractionDigits:2});
 const money = (n) => n == null ? "—" : "Rp" + fmt.format(n);
@@ -32,23 +34,26 @@ function render(){
   const ix=market?.index;$("ihsg").textContent=ix?.price==null?"—":fmt.format(ix.price);
   $("ihsg-change").textContent=ix?.change_pct==null?"Belum ada data IHSG":signed(ix.change)+" ("+signed(ix.change_pct,"%")+")";
   $("ihsg-change").className="delta "+cls(ix?.change_pct);
-  $("market-status").textContent=market?market.market_open?"Market open":"Market closed":"Market status belum tersedia";
+  $("market-status").textContent=market?.market_open != null ? market.market_open?"Market open":"Market closed":"Market status belum tersedia";
   $("updated").textContent=market?.as_of?"Market: "+date(market.as_of):"—";
 }
-async function get(path){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),12000);try{const r=await fetch(path,{signal:controller.signal,headers:{Accept:"application/json"}});if(!r.ok)throw Error("HTTP "+r.status);const v=await r.json();if(v.error)throw Error(v.error.message||"API error");return v}finally{clearTimeout(timer)}}
+async function get(path){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),55000);try{const r=await fetch(apiBase + path,{signal:controller.signal,headers:{Accept:"application/json"}});if(!r.ok)throw Error("HTTP "+r.status);const v=await r.json();if(v.error)throw Error(v.error.message||"API error");return v}finally{clearTimeout(timer)}}
 async function load(){
+  const id = ++loadId;
   if(mode==="demo"){rows=sample;market=null;source="Sample data · 13 Nov 2026";$("notice").textContent="Demo memakai sample dari smoke test 16 Nov 2026; bukan harga terkini.";render();return}
+  if (rows === sample) { rows = []; source = "Live API"; render(); }
   $("notice").textContent="Mengambil data dari backend IDX…";
   try{
     const [m,q]=await Promise.all([get("/api/market"),get("/api/quote?symbols="+encodeURIComponent(symbols.join(",")))]);
+    if(id !== loadId) return;
     if(!Array.isArray(q.data))throw Error("Format quote tidak sesuai");
-    rows=q.data;market=m.data;source=(q.provider||"API")+" · "+(q.stale?"stale":"latest available");
+    rows=q.data;market=m.data;source=(q.provider||"API")+" · "+(q.stale?"stale":q.cached?"cached":"provider response");
     const missing=symbols.filter(s=>!rows.some(q=>q.symbol===s));
-    $("notice").textContent="Data provider: "+(q.provider||"—")+" · fetched "+date(q.fetched_at)+(q.stale?" · STALE":"")+(missing.length?" · Tidak ditemukan: "+missing.join(", "):"");
-  }catch(e){rows=[];market=null;source="Live API tidak tersedia";$("notice").textContent="Gagal mengambil data: "+e.message+". Pastikan dashboard dan API disajikan pada host yang sama. Tidak mengganti live data dengan sample diam-diam."}
+    $("notice").textContent="Data provider: "+(q.provider||"—")+" · fetched "+date(q.fetched_at)+(q.stale?" · STALE":"")+(m.provider?" · Market: "+m.provider+" · fetched "+date(m.fetched_at)+(m.stale?" · STALE":""):"")+(missing.length?" · Tidak ditemukan: "+missing.join(", "):"");
+  }catch(e){if(id !== loadId) return;rows=[];market=null;source="Live API tidak tersedia";$("notice").textContent="Gagal mengambil data: "+e.message+". Periksa alamat API dan akses CORS."}
   render();
 }
 $("demo").addEventListener("click",()=>{mode="demo";load()});$("live").addEventListener("click",()=>{mode="live";load()});$("refresh").addEventListener("click",load);
-$("add").addEventListener("click",()=>{const s=$("symbol").value.trim().toUpperCase().replace(/\.JK$/,"");if(!/^[A-Z0-9][A-Z0-9-]{0,11}$/.test(s)){$("notice").textContent="Masukkan ticker yang valid, misalnya ASII.";return}if(!symbols.includes(s))symbols.push(s);selected=s;$("symbol").value="";load()});
+$("add").addEventListener("click",()=>{const s=$("symbol").value.trim().toUpperCase().replace(/\.JK$/,"");if(!/^[A-Z0-9][A-Z0-9-]{0,11}$/.test(s)){$("notice").textContent="Masukkan ticker yang valid, misalnya ASII.";return}if(!symbols.includes(s)){if(symbols.length >= 20){$("notice").textContent="Maksimal 20 ticker.";return}symbols.push(s);}selected=s;$("symbol").value="";load()});
 $("symbol").addEventListener("keydown",(e)=>{if(e.key==="Enter")$("add").click()});
 load();

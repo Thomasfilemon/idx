@@ -6,40 +6,84 @@ This is Thomas's personal learning/portfolio fork of [fzn0x/idx](https://github.
 
 The upstream service at `https://ihsg.midoriresearch.com`, its Cloudflare account, D1 database, domain, release artifacts, and ownership-data mirror are **not controlled by this fork**. Upstream URLs elsewhere in this repository document the original software, examples, or dependencies; they are not a live backend for Thomas's dashboard. Do not remove source attribution or silently rebrand upstream examples as this fork's results.
 
-## Current status (development branch)
+## Standalone Rust REST API
 
-| Component | Status |
+Run locally with `cargo run --locked --bin idx-api`. The server uses the
+existing Rust provider configuration and cache. It listens on
+`127.0.0.1:8000` by default.
+
+| Variable | Behavior |
 | --- | --- |
-| Mobile dashboard | Published at https://thomasfilemon.github.io/idx/ using GitHub Pages |
-| Dashboard prices | Demo/sample only; **not current market prices** |
-| Rust CLI and tests | Run in GitHub Actions; smoke test previously fetched sample stock data |
-| Thomas-managed API | **Not deployed** |
-| Thomas-managed database | **Not provisioned** |
-| Live market refresh | **Not implemented** |
+| `IDX_API_BIND` | IP and port. Takes precedence over `PORT`. |
+| `PORT` | Port on loopback when `IDX_API_BIND` is unset. |
+| `IDX_API_CORS_ORIGINS` | Comma-separated canonical HTTP(S) origins. Empty by default. |
+| `RUST_LOG` | API log level, such as `info` or `debug`. Defaults to `info`. |
+| `IDX_CONFIG` | Existing CLI configuration file path. |
 
-GitHub Pages hosts static files, not a Rust server. The dashboard's existing `/api/market` and `/api/quote` calls are not served by GitHub Pages; live mode is not expected to work until an independently deployed backend and cross-origin access are configured.
+### HTTP contract
 
-## Backend deployment plan
+```sh
+curl -fsS http://127.0.0.1:8000/healthz
+curl -fsS 'http://127.0.0.1:8000/api/quote?symbols=BBCA,BBRI'
+curl -fsS http://127.0.0.1:8000/api/market
+```
 
-1. **Choose the MVP data contract:** start with `GET /api/market`, `GET /api/quote?symbols=BBCA,BBRI,TLKM`, and `GET /healthz`. Define response examples, freshness timestamps, errors, and stale flags. Do not label delayed or cached data as real-time.
-2. **Own the infrastructure:** create a separate Cloudflare account/project or other free-tier hosting controlled by Thomas. Never reuse upstream `account_id`, `database_id`, `PUBLIC_HOST`, custom domain, or privileged tokens. Keep credentials in the provider's secret store, never Git.
-3. **Start small:** evaluate deploying a minimal API that fetches from permitted data providers and caches responses. Reuse the existing Rust CLI/provider code where practical, but do not assume the existing JavaScript Cloudflare Worker runs Rust directly. If deploying the existing Worker, independently provision its D1 database, apply migrations, review scheduled jobs and upstream mirror dependencies, and update the hostname restriction.
-4. **Connect GitHub Pages:** set an explicit Thomas-owned API base URL in the frontend, restrict CORS to `https://thomasfilemon.github.io`, validate ticker inputs, and handle timeouts, provider failures, rate limits, and stale data. Do not proxy arbitrary URLs.
-5. **Verify:** run automated API contract tests, a live smoke test with no secrets in logs, and mobile-browser checks. Confirm provider terms and rate limits before enabling automatic refresh.
+- Health returns `{"ok":true,"service":"idx-api"}` without a provider call.
+- Quote returns `idx.quotes.v1` and the existing Rust Quote objects. Supply
+  1–20 comma-separated entries before deduplication. Whitespace around entries
+  is trimmed and normalized duplicates are removed in input order.
+- Market returns `idx.market.v1` using the full configured issuer universe and
+  the `^JKSE` benchmark. The REST response adds nullable `data.market_open`
+  to the Rust MarketOverview. A missing benchmark is `data.index: null`.
+  Unlike the Worker snapshot, the status uses regular WIB sessions, including
+  the midday break, weekends, and bundled holiday dates. Status is unknown
+  outside calendar coverage. `data.market_state` is the provider's reported
+  index state. `data.as_of` is the latest stock trade timestamp in the overview.
+- Both envelopes preserve provider attribution, original fetch time, cache
+  flags, stale reason, and null values. The REST API replaces free-form
+  upstream warning strings with public-safe warnings. A recent fetch can
+  contain earlier trade data. The session status describes the current
+  scheduled session.
 
-### What not to do
+Example market response (illustrative, other overview fields omitted):
 
-- Do not point the dashboard at `ihsg.midoriresearch.com` as though it were our own backend.
-- Do not deploy `web/wrangler.toml` unchanged: it contains upstream Cloudflare account, domain, and D1 identifiers.
-- Do not publish demo values as live quotes or fabricate timestamps.
-- Do not add a new database, cron schedule, or full Rust HTTP server until the minimal read-only API requirements justify them.
+```json
+{"schema":"idx.market.v1","provider":"yahoo","fetched_at":"2026-11-18T09:00:00Z","cached":false,"stale":false,"data":{"index":null,"market_open":false,"as_of":"2026-11-18T08:55:00Z"}}
+```
 
-## Existing source-code caveats
+Invalid quote input returns HTTP 400 with
+`{"error":{"code":"invalid_symbols","message":"Provide 1 to 20 valid stock symbols."}}`.
+Missing records return 404 `not_found`. Network/provider failures return
+502 `provider`. Blocked or unsupported providers, offline cache misses and
+concurrency saturation return 503 `unavailable`. API operation deadlines
+return 504 `timeout`. Internal/configuration errors during requests return 500
+`internal`.
 
-- `web/src/worker.js` rejects requests whose hostname does not equal `PUBLIC_HOST`.
-- `web/src/headers.js` currently restricts `connect-src` to `'self'`, which is appropriate for the upstream same-origin site but needs deliberate review for a cross-origin frontend deployment.
-- `web/wrangler.toml` is an upstream deployment example, **not ready for this fork's production use**.
-- `web/public/dashboard.js` currently calls same-origin `/api/*`; do not change it to an upstream domain as a shortcut.
+The API allows four concurrent quote calls and one full market refresh. It
+reuses the provider cache and holds the assembled market result for 60 seconds,
+or a refresh error for five seconds. Each provider operation has a 25-second
+API deadline, in addition to the existing network timeout. Before public
+exposure, configure reverse proxy rate limits that return 429, including a
+global request cap and stricter limits for the market route. Use HTTPS and set
+`IDX_API_CORS_ORIGINS=https://thomasfilemon.github.io` for Pages.
+
+### Dashboard and container
+
+Set the `idx-api-base` meta tag in `web/public/dashboard.html` to the HTTPS
+origin of the independently hosted API. An empty value retains relative
+`/api/*` requests. Demo starts without fetching and Live reports failures
+without falling back to sample prices.
+
+```sh
+docker build -t thomas-idx-api .
+docker run --rm -p 127.0.0.1:8000:8000 -e IDX_API_BIND=0.0.0.0:8000 thomas-idx-api
+curl -fsS http://127.0.0.1:8000/healthz
+```
+
+The runtime runs as a non-root user. Bundled issuer and holiday files are
+compiled into the binary. Mount any optional `IDX_UNIVERSE`, `IDX_HOLIDAYS`,
+or `IDX_CONFIG` files separately. This fork's API requires no Worker or D1
+deployment. The upstream Worker configuration belongs to the original project.
 
 ## Development and attribution
 
