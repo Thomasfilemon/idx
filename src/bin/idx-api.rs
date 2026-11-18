@@ -327,16 +327,19 @@ async fn shutdown() {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let log = match std::env::var("RUST_LOG") {
-        Ok(value) => value.parse::<tracing::Level>()?,
-        Err(std::env::VarError::NotPresent) => tracing::Level::INFO,
-        Err(err) => return Err(err.into()),
-    };
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+
+    let log = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(tracing::Level::INFO.into())
+        .from_env()?;
     // Provider debug events can include full URLs. Enable only HTTP API events.
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_new(format!(
-            "off,idx_api={log}"
-        ))?)
+    tracing_subscriber::registry()
+        .with(log)
+        .with(
+            tracing_subscriber::fmt::layer().with_filter(tracing_subscriber::filter::filter_fn(
+                |meta| meta.target() == "idx_api",
+            )),
+        )
         .init();
     let addr = bind_address()?;
     let origins = match std::env::var("IDX_API_CORS_ORIGINS") {
