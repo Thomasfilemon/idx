@@ -1,5 +1,6 @@
 [package]
 name = "ihsg-cli"
+default-run = "idx"
 version = "0.8.3"
 edition = "2021"
 rust-version = "1.89"
