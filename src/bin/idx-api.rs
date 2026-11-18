@@ -494,9 +494,9 @@ mod tests {
         let app = router(Arc::new(Fixture(0.into(), true)), one_issuer(), vec![]);
         let (status, body) = request(app, "/api/market").await;
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(body["data"]["index"]["price"], 123);
+        assert_eq!(body["data"]["index"]["price"].as_f64(), Some(123.0));
         assert!(body["data"]["index"]["change"].is_null());
-        assert_eq!(body["data"]["index"]["change_pct"], 1);
+        assert_eq!(body["data"]["index"]["change_pct"].as_f64(), Some(1.0));
     }
 
     async fn call(uri: &str) -> (StatusCode, Value) {
