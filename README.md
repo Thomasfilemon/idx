@@ -12,10 +12,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fzn0x/idx/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/fzn0x/idx/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-16a34a.svg"></a>
-  <a href="https://ihsg.midoriresearch.com"><img alt="Web terminal" src="https://img.shields.io/badge/web-ihsg.midoriresearch.com-123a64.svg"></a>
+  <a href="https://thomasfilemon.github.io/idx/"><img alt="Experimental dashboard" src="https://img.shields.io/badge/dashboard-GitHub_Pages-123a64.svg"></a>
 </p>
+
+---
+
+> **Thomas IDX Lab — independent learning fork.** This repository is an experimental fork of [fzn0x/idx](https://github.com/fzn0x/idx), not the original project or its hosted service. The [mobile dashboard on GitHub Pages](https://thomasfilemon.github.io/idx/) currently provides **demo/sample data, not live quotes**. No Thomas-managed live API or data pipeline has been deployed. References below to `ihsg.midoriresearch.com`, upstream release artifacts, and upstream package/install links describe **upstream functionality**, not services operated by Thomas. Do not reuse the upstream Cloudflare account, domain, D1 database, or ownership mirror as this fork's infrastructure. Read [Thomas IDX Lab deployment notes](docs/thomas-lab.md) before deploying a backend. For personal learning, not investment advice.
 
 ---
 
