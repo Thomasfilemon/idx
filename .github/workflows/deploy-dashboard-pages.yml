@@ -35,6 +35,7 @@ jobs:
           set -euo pipefail
           mkdir -p _site
           cp web/public/dashboard.html _site/index.html
+          cp web/public/dashboard.html _site/dashboard.html
           cp web/public/dashboard.css _site/dashboard.css
           cp web/public/dashboard.js _site/dashboard.js
           touch _site/.nojekyll
