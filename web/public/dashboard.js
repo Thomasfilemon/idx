@@ -1,4 +1,4 @@
-const apiBase = document.querySelector('meta[name="idx-api-base"]')?.content.trim().replace(/\\/+$/, "") || "";
+const apiBase = document.querySelector('meta[name="idx-api-base"]')?.content.trim().replace(/\/+$/, "") || "";
 const $ = (id) => document.getElementById(id);
 const fmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
 const number = (n) => Number.isFinite(n) ? fmt.format(n) : "—";
@@ -7,7 +7,7 @@ const signed = (n, unit = "") => Number.isFinite(n) ? (n > 0 ? "+" : "") + fmt.f
 const cls = (n) => n > 0 ? "positive" : n < 0 ? "negative" : "";
 const date = (value) => { if (!value) return "—"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "—" : new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Jakarta" }).format(d) + " WIB"; };
 const allowedSorts = new Set(["symbol", "price", "change_pct", "volume"]);
-const normalizeSymbol = (s) => String(s || "").trim().toUpperCase().replace(/\\.JK$/, "");
+const normalizeSymbol = (s) => String(s || "").trim().toUpperCase().replace(/\.JK$/, "");
 const validSymbol = (s) => /^[A-Z0-9][A-Z0-9-]{0,11}$/.test(s);
 const ensureEnvelope = (body, schema, isValid) => {
   if (!body || body.schema !== schema || !isValid(body.data)) throw Error("Format respons API tidak sesuai (" + schema + ")");
