@@ -31,7 +31,34 @@ function metaState() {
   return (stale ? "STALE · " : quoteMeta.cached || marketMeta.cached ? "CACHED · " : "LIVE · ") +
     "Quote " + date(quoteMeta.fetched_at) + " · Market " + date(marketMeta.fetched_at);
 }
+function renderInsights() {
+  for (const key of ["advancing", "declining", "unchanged", "quoted"]) $(key).textContent = number(market?.[key]);
+  const up = Number.isFinite(market?.advancing) ? market.advancing : 0;
+  const flat = Number.isFinite(market?.unchanged) ? market.unchanged : 0;
+  const down = Number.isFinite(market?.declining) ? market.declining : 0;
+  const total = up + flat + down;
+  $("breadth-up").style.width = total ? (100 * up / total) + "%" : "0%";
+  $("breadth-flat").style.width = total ? (100 * flat / total) + "%" : "0%";
+  $("breadth-down").style.width = total ? (100 * down / total) + "%" : "0%";
+  for (const key of ["gainers", "losers"]) {
+    const items = Array.isArray(market?.[key]) ? market[key].slice(0, 5) : [];
+    const nodes = items.map(item => {
+      const row = document.createElement("div"); row.className = "mover";
+      const symbol = document.createElement("strong"); symbol.textContent = item.symbol || "—";
+      const change = document.createElement("span"); change.className = cls(item.change_pct);
+      change.textContent = signed(item.change_pct, "%");
+      row.append(symbol, change); return row;
+    });
+    if (!nodes.length) {
+      const empty = document.createElement("p"); empty.className = "movers-empty";
+      empty.textContent = status === "loading" ? "Loading…" : "Data belum tersedia";
+      nodes.push(empty);
+    }
+    $(key + "-list").replaceChildren(...nodes);
+  }
+}
 function render() {
+  renderInsights();
   const visible = sortRows(rows.filter(q => q.symbol.toUpperCase().includes(filter) || String(q.name || "").toUpperCase().includes(filter)), sort);
   const list = visible.map(q => {
     const b = document.createElement("button"); b.type = "button";
