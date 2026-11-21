@@ -7,7 +7,7 @@ const script = readFileSync(new URL("../public/dashboard.js", import.meta.url), 
 function setup({ fail = false, invalid = false } = {}) {
   const elements = new Map(), calls = [];
   const element = () => ({
-    textContent: "", value: "", disabled: false, children: [],
+    textContent: "", value: "", disabled: false, children: [], style: {},
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; },
     addEventListener(name, handler) { this[name] = handler; },
@@ -80,4 +80,12 @@ test("API schema mismatch is rejected rather than silently displayed", async () 
   await tick();
   assert.match(elements.get("notice").textContent, /Format respons API tidak sesuai/);
   assert.equal(elements.get("ihsg").textContent, "—");
+});
+
+test("market insight visualizations use only API breadth and movers", async () => {
+  const { elements } = setup();
+  await tick();
+  assert.equal(elements.get("advancing").textContent, "—");
+  assert.equal(elements.get("gainers-list").children.length, 1);
+  assert.match(elements.get("gainers-list").children[0].textContent, /Data belum tersedia/);
 });
