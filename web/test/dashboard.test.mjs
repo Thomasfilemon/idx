@@ -4,14 +4,14 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 
 const script = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
-function setup({ fail = false, invalid = false } = {}) {
+function setup({ fail = false, invalid = false, fetchOverride } = {}) {
   const elements = new Map(), calls = [];
   const element = () => ({
     textContent: "", value: "", disabled: false, children: [], style: {},
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; },
     addEventListener(name, handler) { this[name] = handler; },
-    click() { return this.click?.(); },
+
   });
   const document = {
     querySelector: () => ({ content: "https://api.example.test/" }),
@@ -25,6 +25,8 @@ function setup({ fail = false, invalid = false } = {}) {
     document, AbortController, setTimeout, clearTimeout,
     async fetch(url) {
       calls.push(url);
+      const override = fetchOverride?.(url);
+      if (override) return override;
       if (fail) return { ok: false, status: 503 };
       return { ok: true, async json() {
         if (url.endsWith("/market")) return {
@@ -51,7 +53,7 @@ test("live API loads automatically, no demo mode, stale metadata is visible", as
     "https://api.example.test/api/market",
     "https://api.example.test/api/quote?symbols=BBCA%2CBBRI%2CTLKM",
   ]);
-  assert.match(elements.get("notice").textContent, /STALE/);
+  assert.match(elements.get("market-notice").textContent, /STALE/);
   assert.match(elements.get("mode").textContent, /Stale data/);
   assert.equal(elements.get("detail-price").textContent, "Rp123");
   assert.equal(elements.get("stocks").children.length, 2);
@@ -78,7 +80,7 @@ test("provider errors do not fall back to fabricated sample prices", async () =>
 test("API schema mismatch is rejected rather than silently displayed", async () => {
   const { elements } = setup({ invalid: true });
   await tick();
-  assert.match(elements.get("notice").textContent, /Format respons API tidak sesuai/);
+  assert.match(elements.get("market-notice").textContent, /Format respons API tidak sesuai/);
   assert.equal(elements.get("ihsg").textContent, "—");
 });
 
@@ -88,4 +90,46 @@ test("market insight visualizations use only API breadth and movers", async () =
   assert.equal(elements.get("advancing").textContent, "—");
   assert.equal(elements.get("gainers-list").children.length, 1);
   assert.match(elements.get("gainers-list").children[0].textContent, /Data belum tersedia/);
+});
+
+
+test("market remains visible when quote request fails", async () => {
+  const { elements } = setup({
+    fetchOverride: url => url.includes("/quote?") && { ok: false, status: 503 },
+  });
+  await tick();
+  assert.equal(elements.get("ihsg").textContent, "7.000");
+  assert.match(elements.get("notice").textContent, /HTTP 503/);
+  assert.equal(elements.get("detail-price").textContent, "—");
+  assert.equal(elements.get("refresh").disabled, false);
+});
+
+test("an invalid market response leaves watchlist quotes usable", async () => {
+  const { elements } = setup({ invalid: true });
+  await tick();
+  assert.equal(elements.get("ihsg").textContent, "—");
+  assert.equal(elements.get("stocks").children.length, 2);
+  assert.equal(elements.get("detail-price").textContent, "Rp123");
+});
+
+test("market renders while quotes load, and only the latest watchlist request wins", async () => {
+  let resolveOldQuotes;
+  const oldQuotes = new Promise(resolve => { resolveOldQuotes = resolve; });
+  const { elements, calls } = setup({
+    fetchOverride: url => url.endsWith("BBCA%2CBBRI%2CTLKM") && oldQuotes,
+  });
+  await tick();
+  assert.equal(elements.get("ihsg").textContent, "7.000");
+  assert.equal(elements.get("refresh").disabled, true);
+  elements.get("symbol").value = "asii.jk";
+  elements.get("add").click();
+  await tick();
+  assert.equal(calls.filter(url => url.endsWith("/market")).length, 1);
+  assert.match(calls.at(-1), /%2CASII$/);
+  assert.match(elements.get("notice").textContent, /Tidak ditemukan: .*ASII/);
+  resolveOldQuotes({ ok: false, status: 503 });
+  await tick();
+  assert.equal(elements.get("stocks").children.length, 2);
+  assert.equal(elements.get("refresh").disabled, false);
+  assert.doesNotMatch(elements.get("notice").textContent, /503/);
 });
