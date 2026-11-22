@@ -46,6 +46,9 @@ jobs:
           test -s _site/dashboard.js
           grep -q 'href="./dashboard.css"' _site/index.html
           grep -q 'src="./dashboard.js"' _site/index.html
+          # Keep the HTML and its assets in sync across independent CDN caches.
+          sed -i -e "s|\./dashboard.css|./dashboard.css?v=${GITHUB_SHA}|g" \
+            -e "s|\./dashboard.js|./dashboard.js?v=${GITHUB_SHA}|g" _site/index.html _site/dashboard.html
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload site artifact

@@ -27,44 +27,74 @@ const marketPanel = { meta: null, loading: false, error: "", controller: null };
 const quotesPanel = { meta: null, loading: false, error: "", controller: null };
 function notice(text) { $("notice").textContent = text; }
 function metaState(panel) {
-  if (panel.loading) return "Menghubungkan ke API… Server dapat memerlukan waktu untuk aktif.";
-  if (panel.error) return "Gagal memuat data: " + panel.error + ". Coba Refresh.";
+  if (panel.loading) return panel.meta ? "Memperbarui data…" : "Menghubungkan ke API… Server dapat memerlukan waktu untuk aktif.";
+  if (panel.error) return "Gagal memuat data: " + panel.error + ".";
   const meta = panel.meta;
   if (!meta) return "";
-  const stale = meta.stale || meta.data?.behind_session === true;
-  return (stale ? "STALE · " : meta.cached ? "CACHED · " : "") + "Diambil " + date(meta.fetched_at);
+  const state = [];
+  if (meta.data?.behind_session === true) state.push("Data tertinggal dari sesi terakhir");
+  else if (meta.stale) state.push("Data lama dari provider");
+  if (meta.cached) state.push("Respons dari cache");
+  if (meta.warnings?.length) state.push("Provider melaporkan keterbatasan data");
+  state.push("Respons diambil " + date(meta.fetched_at));
+  return state.join(" · ");
 }
 function renderInsights() {
+  const counts = [market?.advancing, market?.declining, market?.unchanged];
   for (const key of ["advancing", "declining", "unchanged", "quoted"]) $(key).textContent = number(market?.[key]);
-  const up = Number.isFinite(market?.advancing) ? market.advancing : 0;
-  const flat = Number.isFinite(market?.unchanged) ? market.unchanged : 0;
-  const down = Number.isFinite(market?.declining) ? market.declining : 0;
-  const total = up + flat + down;
-  $("breadth-up").style.width = total ? (100 * up / total) + "%" : "0%";
-  $("breadth-flat").style.width = total ? (100 * flat / total) + "%" : "0%";
-  $("breadth-down").style.width = total ? (100 * down / total) + "%" : "0%";
-  for (const key of ["gainers", "losers"]) {
+  const complete = counts.every(count => Number.isInteger(count) && count >= 0);
+  const classified = complete ? counts.reduce((sum, count) => sum + count, 0) : null;
+  $("breadth-track").hidden = !classified;
+  for (const [i, key] of ["up", "down", "flat"].entries()) {
+    $("breadth-" + key).style.width = classified ? (100 * counts[i] / classified) + "%" : "0%";
+  }
+  $("breadth-caption").textContent = Number.isFinite(market?.quoted) && Number.isFinite(market?.universe)
+    ? "Snapshot · " + number(market.quoted) + " dari " + number(market.universe) + " saham tercakup"
+    : "Cakupan snapshot pasar belum tersedia.";
+
+  for (const key of ["gainers", "losers", "most_active"]) {
     const items = Array.isArray(market?.[key]) ? market[key].slice(0, 5) : [];
-    const nodes = items.map(item => {
-      const row = document.createElement("div"); row.className = "mover";
-      const symbol = document.createElement("strong"); symbol.textContent = item.symbol || "—";
-      const change = document.createElement("span"); change.className = cls(item.change_pct);
-      change.textContent = signed(item.change_pct, "%");
-      row.append(symbol, change); return row;
+    const nodes = items.filter(item => item && typeof item.symbol === "string").map(item => {
+      const row = document.createElement("div");
+      row.className = "mover";
+      const symbol = document.createElement("strong");
+      symbol.textContent = item.symbol;
+      const metric = document.createElement("span");
+      if (key === "most_active") {
+        metric.className = "activity-metric";
+        metric.append(money(item.value));
+        const volume = document.createElement("small");
+        volume.textContent = number(item.volume) + (Number.isFinite(item.volume) ? " saham" : "");
+        metric.append(volume);
+      } else {
+        metric.className = cls(item.change_pct);
+        metric.textContent = signed(item.change_pct, "%");
+      }
+      row.append(symbol, metric);
+      return row;
     });
     if (!nodes.length) {
-      const empty = document.createElement("p"); empty.className = "movers-empty";
+      const empty = document.createElement("p");
+      empty.className = "movers-empty";
       empty.textContent = marketPanel.loading ? "Memuat data pasar…" : "Data belum tersedia";
       nodes.push(empty);
     }
     $(key + "-list").replaceChildren(...nodes);
   }
 }
+function quoteChange(change, percent) {
+  if (!Number.isFinite(change)) return signed(percent, "%");
+  return Number.isFinite(percent) ? signed(change) + " (" + signed(percent, "%") + ")" : signed(change);
+}
 function render() {
+  const focusedStock = document.activeElement;
+  const focusedTicker = focusedStock?.dataset?.ticker;
   renderInsights();
   const visible = sortRows(rows.filter(q => q.symbol.toUpperCase().includes(filter) || String(q.name || "").toUpperCase().includes(filter)), sort);
   const list = visible.map(q => {
     const b = document.createElement("button"); b.type = "button";
+    b.dataset.ticker = q.symbol;
+    b.setAttribute("aria-pressed", String(q.symbol === selected));
     b.className = "stock" + (q.symbol === selected ? " selected" : "");
     const left = document.createElement("div"), right = document.createElement("div"); right.className = "stock-right";
     const ticker = document.createElement("div"); ticker.className = "ticker"; ticker.textContent = q.symbol;
@@ -75,24 +105,31 @@ function render() {
     b.addEventListener("click", () => { selected = q.symbol; render(); }); return b;
   });
   $("stocks").replaceChildren(...list);
+  if (focusedTicker) list.find(button => button.dataset.ticker === focusedTicker)?.focus({ preventScroll: true });
   $("empty").textContent = !visible.length && !quotesPanel.loading && !quotesPanel.error ? (filter && rows.length ? "Tidak ada saham yang cocok dengan pencarian." : "Data saham belum tersedia.") : "";
   const q = rows.find(x => x.symbol === selected);
   $("detail-title").textContent = selected + " · Detail saham";
   $("detail-name").textContent = q?.name || "Data belum tersedia";
   $("detail-source").textContent = quotesPanel.meta?.provider || "—";
   $("detail-price").textContent = money(q?.price);
-  $("detail-change").textContent = signed(q?.change) + " (" + signed(q?.change_pct, "%") + ")";
+  $("detail-change").textContent = quoteChange(q?.change, q?.change_pct);
   $("detail-change").className = cls(q?.change_pct);
   $("detail-volume").textContent = number(q?.volume);
   $("detail-time").textContent = date(q?.market_time);
   const ix = market?.index;
   $("ihsg").textContent = number(ix?.price);
-  $("ihsg-change").textContent = ix?.change_pct == null ? "Data IHSG belum tersedia" : signed(ix.change) + " (" + signed(ix.change_pct, "%") + ")";
+  $("ihsg-change").textContent = quoteChange(ix?.change, ix?.change_pct);
   $("ihsg-change").className = "delta " + cls(ix?.change_pct);
-  $("market-status").textContent = market?.market_open === true ? "Market open" : market?.market_open === false ? "Market closed" : "Market status tidak diketahui";
-  $("updated").textContent = market?.as_of ? "Market: " + date(market.as_of) : "—";
-  $("mode").textContent = marketPanel.loading ? "Loading…" : marketPanel.error ? "Market unavailable" : marketPanel.meta?.stale || market?.behind_session ? "Stale data" : "Market snapshot";
-  $("refresh").disabled = marketPanel.loading || quotesPanel.loading;
+  $("market-status").textContent = market?.market_open === true ? "Pasar buka" : market?.market_open === false ? "Pasar tutup" : "Status sesi belum diketahui";
+  $("updated").textContent = "Waktu data pasar · " + date(market?.as_of);
+  $("market-source").textContent = "Provider · " + (marketPanel.meta?.provider || "—");
+  $("mode").textContent = marketPanel.loading ? "Memuat data pasar…" : marketPanel.error ? "Data pasar tidak tersedia"
+    : marketPanel.meta?.stale || market?.behind_session ? "Data pasar tertunda" : "Snapshot pasar";
+  const loading = marketPanel.loading || quotesPanel.loading;
+  $("refresh").setAttribute("aria-disabled", String(loading));
+  $("refresh-label").textContent = loading ? "Memuat data…" : "Refresh data";
+  $("retry-market").hidden = !marketPanel.error;
+  $("retry-quotes").hidden = !quotesPanel.error;
   $("market-notice").textContent = metaState(marketPanel);
   const missing = quotesPanel.meta && !quotesPanel.loading ? symbols.filter(s => !rows.some(q => q.symbol === s)) : [];
   notice(metaState(quotesPanel) + (missing.length ? " · Tidak ditemukan: " + missing.join(", ") : ""));
@@ -147,17 +184,45 @@ function load() {
   loadMarket();
   loadQuotes();
 }
-$("refresh").addEventListener("click", load);
-$("add").addEventListener("click", () => {
-  const s = normalizeSymbol($("symbol").value);
-  if (!validSymbol(s)) { notice("Masukkan ticker IDX yang valid, misalnya ASII."); return; }
+$("refresh").addEventListener("click", () => {
+  if (!marketPanel.loading && !quotesPanel.loading) load();
+});
+$("retry-market").addEventListener("click", () => {
+  $("refresh").focus();
+  loadMarket();
+});
+$("retry-quotes").addEventListener("click", () => {
+  $("symbol").focus();
+  loadQuotes();
+});
+$("symbol").addEventListener("input", () => {
+  $("symbol").removeAttribute("aria-invalid");
+  $("symbol-feedback").textContent = "";
+});
+$("add-stock").addEventListener("submit", e => {
+  e.preventDefault();
+  const input = $("symbol");
+  const s = normalizeSymbol(input.value);
+  const feedback = $("symbol-feedback");
+  if (!validSymbol(s)) {
+    feedback.textContent = "Masukkan ticker IDX yang valid, misalnya ASII.";
+    input.setAttribute("aria-invalid", "true");
+    input.focus();
+    return;
+  }
   if (!symbols.includes(s)) {
-    if (symbols.length >= 20) { notice("Maksimal 20 ticker."); return; }
+    if (symbols.length >= 20) {
+      feedback.textContent = "Watchlist sudah berisi 20 ticker.";
+      return;
+    }
     symbols.push(s);
   }
-  selected = s; $("symbol").value = ""; loadQuotes();
+  selected = s;
+  input.value = "";
+  input.removeAttribute("aria-invalid");
+  feedback.textContent = "";
+  loadQuotes();
 });
-$("symbol").addEventListener("keydown", e => { if (e.key === "Enter") $("add").click(); });
 $("explorer-search").addEventListener("input", e => { filter = e.target.value.trim().toUpperCase(); render(); });
 $("explorer-sort").addEventListener("change", e => { sort = allowedSorts.has(e.target.value) ? e.target.value : "symbol"; render(); });
 load();
