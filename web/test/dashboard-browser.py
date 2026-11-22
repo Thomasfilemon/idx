@@ -43,7 +43,7 @@ def smoke(browser, name, width, screenshots):
         has_touch=name == "mobile", is_mobile=name == "mobile", reduced_motion="reduce",
     )
     errors = []
-    page.on("pageerror", errors.append)
+    page.on("pageerror", lambda error: errors.append(str(error)))
     market_requests = 0
     quote_requests = 0
 
