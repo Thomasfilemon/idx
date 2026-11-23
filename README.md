@@ -12,14 +12,24 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml/badge.svg?branch=development"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-16a34a.svg"></a>
   <a href="https://thomasfilemon.github.io/idx/"><img alt="Experimental dashboard" src="https://img.shields.io/badge/dashboard-GitHub_Pages-123a64.svg"></a>
 </p>
 
 ---
 
-> **Thomas IDX Lab — independent learning fork.** This repository is an experimental fork of [fzn0x/idx](https://github.com/fzn0x/idx), not the original project or its hosted service. The [mobile dashboard on GitHub Pages](https://thomasfilemon.github.io/idx/) currently provides **demo/sample data, not live quotes**. No Thomas-managed live API or data pipeline has been deployed. References below to `ihsg.midoriresearch.com`, upstream release artifacts, and upstream package/install links describe **upstream functionality**, not services operated by Thomas. Do not reuse the upstream Cloudflare account, domain, D1 database, or ownership mirror as this fork's infrastructure. Read [Thomas IDX Lab deployment notes](docs/thomas-lab.md) before deploying a backend. For personal learning, not investment advice.
+## Thomas IDX Lab
+
+> **Branch status.** The default branch (`main`) is behind [`development`](https://github.com/Thomasfilemon/idx/tree/development), which contains the latest Thomas IDX Lab changes.
+
+Thomas IDX Lab is an independent learning fork of [fzn0x/idx](https://github.com/fzn0x/idx). The [GitHub Pages dashboard](https://thomasfilemon.github.io/idx/) uses the [standalone Rust/Axum API](https://idx-api-1bd1.onrender.com/healthz) hosted on Render. It shows the IHSG snapshot, market breadth, movers, and watchlist quotes from the API. Provider data can be delayed or incomplete.
+
+- `GET /healthz` checks API liveness.
+- `GET /api/market` returns the market snapshot and freshness metadata.
+- `GET /api/quote?symbols=BBCA,BBRI` returns quotes for the requested tickers.
+
+See the [deployment notes](docs/thomas-lab.md) for local setup and API details. The CLI examples, web terminal screenshots, package links, and hosted tooling below refer to the upstream project.
 
 ---
 
