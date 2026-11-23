@@ -12,10 +12,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fzn0x/idx/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/fzn0x/idx/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-16a34a.svg"></a>
   <a href="https://ihsg.midoriresearch.com"><img alt="Web terminal" src="https://img.shields.io/badge/web-ihsg.midoriresearch.com-123a64.svg"></a>
 </p>
+
+---
+
+> **Thomas IDX Lab branch status.** The default branch (`main`) is behind [`development`](https://github.com/Thomasfilemon/idx/tree/development), which contains the latest Thomas IDX Lab changes. The standalone Rust API and [Thomas IDX Lab dashboard](https://thomasfilemon.github.io/idx/) are maintained on `development`. The CLI, screenshots, and service links below describe the [upstream IDX project](https://github.com/fzn0x/idx).
 
 ---
 
