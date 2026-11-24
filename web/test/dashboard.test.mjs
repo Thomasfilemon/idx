@@ -219,3 +219,25 @@ test("selecting a watchlist row preserves keyboard focus and updates its pressed
   assert.equal(bbri.focused, true);
   assert.match(elements.get("detail-title").textContent, /^BBRI/);
 });
+
+test("failed refresh retains real snapshots with an explicit warning until retry succeeds", async () => {
+  let failRefresh = false;
+  const { elements } = setup({ fetchOverride: () => failRefresh && { ok: false, status: 503 } });
+  await tick();
+  failRefresh = true;
+  elements.get("refresh").click();
+  await tick();
+  assert.equal(elements.get("ihsg").textContent, "7.000");
+  assert.equal(elements.get("detail-price").textContent, "Rp123");
+  assert.equal(elements.get("mode").textContent, "Snapshot sebelumnya");
+  assert.equal(elements.get("market-status").textContent, "Status sesi belum diperbarui");
+  for (const id of ["market-notice", "notice"]) {
+    assert.match(elements.get(id).textContent, /HTTP 503.*data terakhir.*WIB/);
+  }
+  failRefresh = false;
+  elements.get("retry-market").click();
+  await tick();
+  assert.equal(elements.get("retry-market").hidden, true);
+  assert.equal(elements.get("retry-quotes").hidden, false);
+  assert.doesNotMatch(elements.get("market-notice").textContent, /HTTP 503/);
+});

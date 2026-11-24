@@ -28,7 +28,10 @@ const quotesPanel = { meta: null, loading: false, error: "", controller: null };
 function notice(text) { $("notice").textContent = text; }
 function metaState(panel) {
   if (panel.loading) return panel.meta ? "Memperbarui data…" : "Menghubungkan ke API… Server dapat memerlukan waktu untuk aktif.";
-  if (panel.error) return "Gagal memuat data: " + panel.error + ".";
+  if (panel.error) {
+    const message = "Gagal memuat data: " + panel.error + ".";
+    return panel.meta ? message + " Menampilkan data terakhir yang berhasil diambil pada " + date(panel.meta.fetched_at) + "." : message;
+  }
   const meta = panel.meta;
   if (!meta) return "";
   const state = [];
@@ -120,10 +123,10 @@ function render() {
   $("ihsg").textContent = number(ix?.price);
   $("ihsg-change").textContent = quoteChange(ix?.change, ix?.change_pct);
   $("ihsg-change").className = "delta " + cls(ix?.change_pct);
-  $("market-status").textContent = market?.market_open === true ? "Pasar buka" : market?.market_open === false ? "Pasar tutup" : "Status sesi belum diketahui";
+  $("market-status").textContent = marketPanel.error ? "Status sesi belum diperbarui" : market?.market_open === true ? "Pasar buka" : market?.market_open === false ? "Pasar tutup" : "Status sesi belum diketahui";
   $("updated").textContent = "Waktu data pasar · " + date(market?.as_of);
   $("market-source").textContent = "Provider · " + (marketPanel.meta?.provider || "—");
-  $("mode").textContent = marketPanel.loading ? "Memuat data pasar…" : marketPanel.error ? "Data pasar tidak tersedia"
+  $("mode").textContent = marketPanel.loading ? "Memuat data pasar…" : marketPanel.error ? (marketPanel.meta ? "Snapshot sebelumnya" : "Data pasar tidak tersedia")
     : marketPanel.meta?.stale || market?.behind_session ? "Data pasar tertunda" : "Snapshot pasar";
   const loading = marketPanel.loading || quotesPanel.loading;
   $("refresh").setAttribute("aria-disabled", String(loading));
@@ -131,7 +134,7 @@ function render() {
   $("retry-market").hidden = !marketPanel.error;
   $("retry-quotes").hidden = !quotesPanel.error;
   $("market-notice").textContent = metaState(marketPanel);
-  const missing = quotesPanel.meta && !quotesPanel.loading ? symbols.filter(s => !rows.some(q => q.symbol === s)) : [];
+  const missing = quotesPanel.meta && !quotesPanel.loading && !quotesPanel.error ? symbols.filter(s => !rows.some(q => q.symbol === s)) : [];
   notice(metaState(quotesPanel) + (missing.length ? " · Tidak ditemukan: " + missing.join(", ") : ""));
 }
 async function get(path, signal) {
@@ -161,9 +164,7 @@ async function loadPanel(panel, path, schema, isValid, accept) {
     accept(body.data);
   } catch (e) {
     if (panel.controller !== controller) return;
-    panel.meta = null;
     panel.error = e.name === "AbortError" ? "request timeout (55 detik)" : e.message;
-    accept(null);
   }
   panel.loading = false;
   render();
