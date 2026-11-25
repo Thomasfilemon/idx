@@ -32,7 +32,7 @@ const TIMEOUT: Duration = Duration::from_secs(25);
 const MARKET_TTL: Duration = Duration::from_secs(60);
 const FAILURE_TTL: Duration = Duration::from_secs(5);
 type ApiError = (StatusCode, Json<Value>);
-type MarketResult = Result<Envelope<MarketOverview>, ApiError>;
+type MarketResult = Result<Envelope<service::MarketWithMoverFallback>, ApiError>;
 
 #[derive(Clone)]
 struct AppState {
@@ -321,7 +321,7 @@ async fn market(
     } else {
         let result = match tokio::time::timeout(
             TIMEOUT,
-            service::market_overview(
+            service::market_overview_with_mover_fallback(
                 state.provider.as_ref(),
                 &state.universe,
                 &state.index,
@@ -331,7 +331,9 @@ async fn market(
         )
         .await
         {
-            Ok(Ok(data)) if data.data.index.is_none() && data.data.quoted == 0 => {
+            Ok(Ok(data))
+                if data.data.overview.index.is_none() && data.data.overview.quoted == 0 =>
+            {
                 Err(unavailable())
             }
             Ok(Ok(data)) => Ok(public_envelope(SCHEMA_MARKET, data)),
@@ -355,7 +357,9 @@ async fn market(
         stale_reason: envelope.stale_reason,
         warnings: envelope.warnings,
         data: MarketData {
-            overview: envelope.data,
+            overview: envelope.data.overview,
+            gainers_fallback: envelope.data.gainers_fallback,
+            losers_fallback: envelope.data.losers_fallback,
             market_open: market_open(Utc::now()),
         },
     }))
@@ -366,6 +370,8 @@ struct MarketData {
     #[serde(flatten)]
     overview: MarketOverview,
     market_open: Option<bool>,
+    gainers_fallback: bool,
+    losers_fallback: bool,
 }
 
 async fn cors(State(origins): State<Arc<[HeaderValue]>>, req: Request, next: Next) -> Response {
@@ -551,7 +557,7 @@ mod tests {
                 .map(|s| {
                     serde_json::from_value(json!({
                         "symbol": s, "source": "fixture", "price": 123,
-                        "change_pct": 1, "market_time": "2026-11-18T10:00:00+07:00"
+                        "change_pct": 1, "market_time": "2026-11-18T10:00:00+07:00", "volume": self.1.then_some(100)
                     }))
                     .unwrap()
                 })
@@ -753,6 +759,10 @@ mod tests {
         assert_eq!(body["data"]["index"]["price"].as_f64(), Some(123.0));
         assert!(body["data"]["index"]["change"].is_null());
         assert_eq!(body["data"]["index"]["change_pct"].as_f64(), Some(1.0));
+        assert_eq!(body["data"]["gainers_fallback"], true);
+        assert_eq!(body["data"]["losers_fallback"], false);
+        assert_eq!(body["data"]["gainers"][0]["volume"], 100);
+        assert!(body["data"]["gainers"][0]["market_cap"].is_null());
     }
 
     async fn call(uri: &str) -> (StatusCode, Value) {

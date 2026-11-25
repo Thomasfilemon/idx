@@ -40,6 +40,12 @@ curl -fsS 'http://127.0.0.1:8000/api/history?symbol=BBCA&range=3w'
   the midday break, weekends, and bundled holiday dates. Status is unknown
   outside calendar coverage. `data.market_state` is the provider's reported
   index state. `data.as_of` is the latest stock trade timestamp in the overview.
+  Gainers and losers normally require positive volume and the market-cap
+  floor. If either direction has no qualifying stock and market cap is
+  missing for traded stocks on that side, REST ranks that side by percentage
+  change among the traded stocks in the same snapshot, without the cap floor.
+  `data.gainers_fallback` and `data.losers_fallback` identify the fallback
+  independently. This makes no additional provider requests.
 - History returns `idx.daily-history.v1` with `data.symbol`, `data.range`, nullable
   provider `data.currency`, and `data.points` (oldest first). Each point has a
   trading `date` in WIB, a WIB `bar_time` (bar timestamp, not closing time),

@@ -29,7 +29,8 @@ MARKET = {
         "index": {"price": 8354.74, "change_pct": -0.63},
         "as_of": NOW, "market_open": False, "behind_session": False,
         "advancing": 220, "declining": 456, "unchanged": 235, "quoted": 911, "universe": 955,
-        "gainers": [], "losers": [BBCA],
+        "gainers": [{"symbol": "ASII", "change_pct": 2.5}], "losers": [BBCA],
+        "gainers_fallback": True, "losers_fallback": False,
         "most_active": [{**BBCA, "value": 819_385_905_000}],
     },
 }
@@ -88,6 +89,9 @@ def smoke(browser, name, width, screenshots):
     page.goto(f"{SITE}/#dashboard")
     expect(page.locator("#quoted")).to_have_text("911")
     expect(page.get_by_text("Pasar tutup")).to_be_visible()
+    expect(page.locator("#gainers-list")).to_contain_text("ASII")
+    expect(page.locator("#gainers-list")).to_contain_text("tanpa filter kapitalisasi pasar")
+    expect(page.locator("#losers-list")).not_to_contain_text("tanpa filter kapitalisasi pasar")
     expect(page.get_by_text("Rp819.385.905.000")).to_be_visible()
     expect(page.get_by_role("status").filter(has_text="HTTP 503")).to_be_visible()
     page.get_by_role("button", name="Muat ulang watchlist").press("Enter")
@@ -152,6 +156,7 @@ def smoke(browser, name, width, screenshots):
     language.select_option("en")
     expect(page.locator("html")).to_have_attribute("lang", "en")
     expect(page.get_by_text("Historical chart", exact=True)).to_be_visible()
+    expect(page.locator("#gainers-list")).to_contain_text("without a market-cap filter")
     expect(page.get_by_text("Highest volume · 1,200 shares")).to_be_visible()
     expect(page.get_by_role("table", name="Daily historical records")).to_be_visible()
     assert quote_requests == 3

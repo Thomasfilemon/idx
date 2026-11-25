@@ -111,6 +111,15 @@ function renderInsights() {
       empty.textContent = marketPanel.loading ? tr("Memuat data pasar…", "Loading market data…") : tr("Data belum tersedia", "Data unavailable");
       nodes.push(empty);
     }
+    if (items.length && market?.[key + "_fallback"] === true) {
+      const note = document.createElement("p");
+      note.className = "movers-empty";
+      note.textContent = tr(
+        "Peringkat dari saham bervolume positif, tanpa filter kapitalisasi pasar.",
+        "Ranked among stocks with positive volume, without a market-cap filter."
+      );
+      nodes.push(note);
+    }
     $(key + "-list").replaceChildren(...nodes);
   }
 }
