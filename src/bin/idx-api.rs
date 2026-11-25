@@ -552,7 +552,7 @@ mod tests {
                 volume: 0,
             };
             let mut old = candle.clone();
-            old.time -= chrono::Days::new(25);
+            old.time = time.checked_sub_days(chrono::Days::new(25)).unwrap();
             let mut result = Sourced::fresh(
                 History {
                     symbol: symbol.clone(),
