@@ -84,3 +84,7 @@
   .detail-grid { gap: 10px; }
   .dashboard-shell input, .dashboard-shell select { font-size: 16px; }
 }
+
+#issuer-results:not(:empty) { margin-top: 8px; }
+#issuer-results .stock { overflow-wrap: anywhere; min-height: 44px; }
+#issuer-search > .notice { margin-top: 6px; }

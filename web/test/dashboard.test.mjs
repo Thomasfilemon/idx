@@ -241,3 +241,56 @@ test("failed refresh retains real snapshots with an explicit warning until retry
   assert.equal(elements.get("retry-quotes").hidden, false);
   assert.doesNotMatch(elements.get("market-notice").textContent, /HTTP 503/);
 });
+
+test("issuer discovery searches by name or ticker and fetches quotes only on add", async () => {
+  const catalog = [{ symbol: "ASII", name: "ASTRA INTERNATIONAL Tbk" }];
+  const { elements, calls } = setup({
+    fetchOverride: url => url.startsWith("./issuer-catalog.json") && { ok: true, json: async () => catalog },
+  });
+  await tick();
+  const form = elements.get("issuer-search");
+  const query = elements.get("issuer-query");
+  query.value = "astra";
+  await form.submit({ preventDefault() {} });
+  const results = elements.get("issuer-results");
+  assert.equal(results.children[0].textContent, "ASII · ASTRA INTERNATIONAL Tbk");
+  assert.equal(calls.length, 3);
+  results.children[0].click();
+  assert.equal(elements.get("symbol").value, "ASII");
+  assert.equal(calls.length, 3);
+  elements.get("add-stock").submit({ preventDefault() {} });
+  await tick();
+  assert.match(calls.at(-1), /%2CASII$/);
+  query.value = "asii.jk";
+  await form.submit({ preventDefault() {} });
+  assert.equal(results.children.length, 1);
+  assert.equal(calls.filter(url => url.startsWith("./issuer-catalog.json")).length, 1);
+});
+
+test("issuer discovery limits results, ignores outdated searches and can retry a failed catalog load", async () => {
+  let attempts = 0;
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { elements } = setup({ fetchOverride: url => {
+    if (!url.startsWith("./issuer-catalog.json")) return;
+    return ++attempts === 1 ? { ok: false, status: 503 } : pending;
+  } });
+  const form = elements.get("issuer-search");
+  const query = elements.get("issuer-query");
+  query.value = "BANK";
+  await form.submit({ preventDefault() {} });
+  assert.match(elements.get("issuer-status").textContent, /tidak tersedia/);
+  const old = form.submit({ preventDefault() {} });
+  query.value = "BK9";
+  query.input();
+  const current = form.submit({ preventDefault() {} });
+  const rows = Array.from({ length: 10 }, (_, i) => ({ symbol: "BK" + i, name: "BANK " + i }));
+  finish({ ok: true, json: async () => rows });
+  await Promise.all([old, current]);
+  assert.equal(elements.get("issuer-results").children.length, 1);
+  assert.match(elements.get("issuer-results").children[0].textContent, /^BK9/);
+  query.value = "BANK";
+  await form.submit({ preventDefault() {} });
+  assert.equal(elements.get("issuer-results").children.length, 8);
+  assert.match(elements.get("issuer-status").textContent, /8 dari 10/);
+});

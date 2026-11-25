@@ -8,6 +8,8 @@ on:
       - 'web/public/dashboard.html'
       - 'web/public/dashboard.css'
       - 'web/public/dashboard.js'
+      - 'data/universe.csv'
+      - 'web/scripts/issuer-catalog.py'
       - '.github/workflows/deploy-dashboard-pages.yml'
 
 permissions:
@@ -39,6 +41,7 @@ jobs:
           cp web/public/dashboard.html _site/dashboard.html
           cp web/public/dashboard.css _site/dashboard.css
           cp web/public/dashboard.js _site/dashboard.js
+          python3 web/scripts/issuer-catalog.py > _site/issuer-catalog.json
           touch _site/.nojekyll
           test -s _site/index.html
           grep -q 'Market data.' _site/index.html
@@ -48,7 +51,8 @@ jobs:
           grep -q 'src="./dashboard.js"' _site/index.html
           # Keep the HTML and its assets in sync across independent CDN caches.
           sed -i -e "s|\./dashboard.css|./dashboard.css?v=${GITHUB_SHA}|g" \
-            -e "s|\./dashboard.js|./dashboard.js?v=${GITHUB_SHA}|g" _site/index.html _site/dashboard.html
+            -e "s|\./dashboard.js|./dashboard.js?v=${GITHUB_SHA}|g" \
+            -e "s|name=\"idx-build\" content=\"\"|name=\"idx-build\" content=\"${GITHUB_SHA}\"|" _site/index.html _site/dashboard.html
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload site artifact

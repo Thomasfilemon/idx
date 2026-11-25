@@ -137,18 +137,18 @@ function render() {
   const missing = quotesPanel.meta && !quotesPanel.loading && !quotesPanel.error ? symbols.filter(s => !rows.some(q => q.symbol === s)) : [];
   notice(metaState(quotesPanel) + (missing.length ? " · Tidak ditemukan: " + missing.join(", ") : ""));
 }
-async function get(path, signal) {
+async function get(path, signal, base = apiBase) {
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), 55000);
   const abort = () => timeout.abort();
-  signal.addEventListener("abort", abort, { once: true });
+  signal?.addEventListener("abort", abort, { once: true });
   try {
-    const response = await fetch(apiBase + path, { signal: timeout.signal, headers: { Accept: "application/json" } });
+    const response = await fetch(base + path, { signal: timeout.signal, headers: { Accept: "application/json" } });
     if (!response.ok) throw Error("HTTP " + response.status);
     const body = await response.json();
     if (body?.error) throw Error(body.error.message || "API error");
     return body;
-  } finally { clearTimeout(timer); signal.removeEventListener("abort", abort); }
+  } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
 }
 async function loadPanel(panel, path, schema, isValid, accept) {
   panel.controller?.abort();
@@ -185,6 +185,67 @@ function load() {
   loadMarket();
   loadQuotes();
 }
+let issuerCatalog;
+let issuerSearchId = 0;
+function loadIssuerCatalog() {
+  issuerCatalog ??= get("./issuer-catalog.json?v=" + encodeURIComponent(document.querySelector('meta[name="idx-build"]')?.content || ""), undefined, "")
+    .then(data => {
+      if (!Array.isArray(data) || !data.length || !data.every(issuer =>
+        typeof issuer?.symbol === "string" && validSymbol(issuer.symbol) && typeof issuer.name === "string")) {
+        throw Error("Katalog emiten tidak valid");
+      }
+      return data;
+    })
+    .catch(error => {
+      issuerCatalog = undefined;
+      throw error;
+    });
+  return issuerCatalog;
+}
+$("issuer-query").addEventListener("input", () => {
+  issuerSearchId++;
+  $("issuer-results").replaceChildren();
+  $("issuer-status").textContent = "";
+});
+$("issuer-search").addEventListener("submit", async event => {
+  event.preventDefault();
+  const id = ++issuerSearchId;
+  const query = $("issuer-query").value.trim().toUpperCase();
+  const ticker = normalizeSymbol(query);
+  const status = $("issuer-status");
+  const results = $("issuer-results");
+  results.replaceChildren();
+  if (query.length < 2) {
+    status.textContent = "Masukkan minimal 2 karakter.";
+    return;
+  }
+  status.textContent = "Memuat katalog emiten…";
+  try {
+    const catalog = await loadIssuerCatalog();
+    if (id !== issuerSearchId) return;
+    const rank = issuer => issuer.symbol === ticker ? 0 : issuer.symbol.startsWith(ticker) ? 1 : 2;
+    const matches = catalog.filter(issuer => rank(issuer) < 2 || issuer.name.toUpperCase().includes(query))
+      .sort((a, b) => rank(a) - rank(b) || a.symbol.localeCompare(b.symbol));
+    const buttons = matches.slice(0, 8).map(issuer => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "stock";
+      button.textContent = issuer.symbol + " · " + issuer.name;
+      button.addEventListener("click", () => {
+        $("symbol").value = issuer.symbol;
+        $("symbol").removeAttribute("aria-invalid");
+        $("symbol-feedback").textContent = "";
+        $("symbol").focus();
+      });
+      return button;
+    });
+    results.replaceChildren(...buttons);
+    status.textContent = matches.length ? "Menampilkan " + buttons.length + " dari " + matches.length + " hasil. Pilih emiten untuk mengisi ticker."
+      : "Emiten tidak ditemukan di katalog.";
+  } catch {
+    if (id === issuerSearchId) status.textContent = "Katalog tidak tersedia. Coba cari lagi atau masukkan ticker secara manual.";
+  }
+});
 $("refresh").addEventListener("click", () => {
   if (!marketPanel.loading && !quotesPanel.loading) load();
 });

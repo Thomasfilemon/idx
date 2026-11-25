@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#090d17">
   <meta name="description" content="Thomas IDX Lab — proyek open-source untuk eksplorasi data saham Indonesia, dibangun dengan Rust dan dashboard interaktif.">
   <meta name="idx-api-base" content="https://idx-api-1bd1.onrender.com">
+  <meta name="idx-build" content="">
   <title>Thomas IDX Lab — Indonesian Market Data, Built in Rust</title>
   <link rel="stylesheet" href="./dashboard.css">
 </head>
@@ -94,6 +95,13 @@
           <div class="dashboard-body">
             <section class="dashboard-list" aria-labelledby="watchlist-heading">
               <div class="section-head"><h3 id="watchlist-heading">Stock watchlist</h3></div>
+              <form id="issuer-search" class="search">
+                <label for="issuer-query">Cari di katalog emiten IDX</label>
+                <div class="search-line"><input id="issuer-query" maxlength="80" autocomplete="off" placeholder="Nama emiten atau ticker"><button type="submit">Cari</button></div>
+                <p class="notice">Katalog mengikuti snapshot emiten di repositori. Harga dimuat setelah ticker ditambahkan.</p>
+                <p id="issuer-status" class="notice" role="status"></p>
+                <div id="issuer-results" class="stocks" aria-label="Hasil pencarian emiten"></div>
+              </form>
               <form id="add-stock" class="search">
                 <label for="symbol">Tambah ticker saham</label>
                 <div class="search-line"><input id="symbol" maxlength="15" autocomplete="off" placeholder="Contoh BBCA" aria-describedby="symbol-feedback"><button id="add" type="submit">Tambah</button></div>

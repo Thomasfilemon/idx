@@ -1,6 +1,8 @@
 """Run with Python Playwright and Chrome to check the dashboard and capture review screenshots."""
 
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
@@ -10,6 +12,7 @@ PUBLIC = Path(__file__).resolve().parents[1] / "public"
 SITE = "https://idx-dashboard.test"
 NOW = "2026-11-20T09:14:59Z"
 API = "https://idx-api-1bd1.onrender.com"
+CATALOG = subprocess.check_output([sys.executable, str(PUBLIC.parent / "scripts/issuer-catalog.py")])
 OPTIONS = {"provider": "fixture", "fetched_at": NOW, "cached": False, "stale": False}
 BBCA = {
     "symbol": "BBCA", "name": "PT Bank Central Asia Tbk", "price": 5550,
@@ -60,6 +63,8 @@ def smoke(browser, name, width, screenshots):
                 route.fulfill(status=503, json={"error": {"code": "unavailable"}}, headers=cors)
             else:
                 route.fulfill(json=QUOTES, headers=cors)
+        elif url.startswith(f"{SITE}/issuer-catalog.json?"):
+            route.fulfill(body=CATALOG, content_type="application/json")
         elif url.startswith(f"{SITE}/") and url[len(SITE):] in ASSETS:
             path, content_type = ASSETS[url[len(SITE):]]
             body = (PUBLIC / path).read_text(encoding="utf-8")
@@ -101,6 +106,13 @@ def smoke(browser, name, width, screenshots):
     page.get_by_role("button", name="Refresh data").press("Enter")
     expect(page.locator("#refresh")).to_have_attribute("aria-disabled", "false")
     assert market_requests == 2 and quote_requests == 3
+    issuer_query = page.get_by_role("textbox", name="Cari di katalog emiten IDX")
+    issuer_query.fill("Astra International")
+    issuer_query.press("Enter")
+    page.get_by_role("button", name="ASII · ASTRA INTERNATIONAL Tbk").press("Enter")
+    expect(ticker).to_have_value("ASII")
+    expect(ticker).to_be_focused()
+    assert quote_requests == 3
     assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
     assert page.locator(".dashboard-shell").evaluate("(el) => el.scrollWidth <= el.clientWidth")
     assert page.locator(".explorer-controls").evaluate("(el) => el.scrollWidth <= el.clientWidth")
