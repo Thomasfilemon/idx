@@ -13,12 +13,12 @@ use axum::{
     routing::get,
     Json, Router,
 };
-use chrono::{DateTime, Datelike, Timelike, Utc, Weekday};
+use chrono::{DateTime, Datelike, Months, NaiveDate, Timelike, Utc, Weekday};
 use idx::{
     cli::{build_context, GlobalOpts},
     error::IdxError,
     holidays,
-    model::{MarketOverview, Symbol},
+    model::{Interval, MarketOverview, Period, Symbol},
     output::json::{Envelope, SCHEMA_MARKET, SCHEMA_QUOTES},
     providers::Provider,
     service,
@@ -40,6 +40,7 @@ struct AppState {
     universe: Arc<[Issuer]>,
     index: Symbol,
     quote_slots: Arc<Semaphore>,
+    history_slots: Arc<Semaphore>,
     market: Arc<Mutex<Option<(Instant, MarketResult)>>>,
 }
 
@@ -144,6 +145,104 @@ async fn quote(
         .map_err(|_| timed_out())?
         .map_err(provider_error)?;
     Ok(Json(public_envelope(SCHEMA_QUOTES, result)))
+}
+
+const SCHEMA_DAILY_HISTORY: &str = "idx.daily-history.v1";
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoryQuery {
+    symbol: String,
+    range: String,
+}
+
+#[derive(serde::Serialize)]
+struct DailyHistory {
+    symbol: Symbol,
+    range: String,
+    points: Vec<DailyPoint>,
+}
+
+#[derive(serde::Serialize)]
+struct DailyPoint {
+    date: NaiveDate,
+    close: f64,
+    volume: Option<u64>,
+}
+
+fn history_window(range: &str, today: NaiveDate) -> Option<(Period, NaiveDate)> {
+    let (period, months) = match range {
+        "3w" => return Some((Period::M1, today - chrono::Days::new(20))),
+        "1mo" => (Period::M1, 1),
+        "3mo" => (Period::M3, 3),
+        "ytd" => return Some((Period::Ytd, today.with_ordinal(1)?)),
+        "1y" => (Period::Y1, 12),
+        "3y" => (Period::Y5, 36),
+        _ => return None,
+    };
+    Some((period, today.checked_sub_months(Months::new(months))?))
+}
+
+async fn history(
+    State(state): State<AppState>,
+    query: Result<Query<HistoryQuery>, QueryRejection>,
+) -> Result<Json<Envelope<DailyHistory>>, ApiError> {
+    let invalid = || {
+        error(
+            StatusCode::BAD_REQUEST,
+            "invalid_history_query",
+            "Supply one IDX stock symbol and a range: 3w, 1mo, 3mo, ytd, 1y or 3y.",
+        )
+    };
+    let Query(query) = query.map_err(|_| invalid())?;
+    let symbol = Symbol::parse(&query.symbol).map_err(|_| invalid())?;
+    if symbol.as_str().starts_with('^') {
+        return Err(invalid());
+    }
+    let today = Utc::now()
+        .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).expect("WIB"))
+        .date_naive();
+    let (period, start) = history_window(&query.range, today).ok_or_else(invalid)?;
+    let _slot = state
+        .history_slots
+        .try_acquire()
+        .map_err(|_| unavailable())?;
+    let sourced = tokio::time::timeout(
+        TIMEOUT,
+        state.provider.history(&symbol, period, Interval::Day1),
+    )
+    .await
+    .map_err(|_| timed_out())?
+    .map_err(provider_error)?;
+    if sourced.data.interval != Interval::Day1 || sourced.data.symbol != symbol {
+        return Err(unavailable());
+    }
+
+    let result = sourced.map(|mut history| {
+        history.candles.retain(|candle| {
+            (start..=today).contains(&candle.date())
+                && candle.close.is_finite()
+                && candle.close > 0.0
+        });
+        history.candles.sort_by_key(|candle| candle.time);
+        history.candles.dedup_by_key(|candle| candle.date());
+        let points = history
+            .candles
+            .into_iter()
+            .map(|candle| DailyPoint {
+                date: candle.date(),
+                close: candle.close,
+                // Some providers map missing volume to zero in the shared model.
+                volume: (candle.volume > 0).then_some(candle.volume),
+            })
+            .collect();
+        DailyHistory {
+            symbol,
+            range: query.range,
+            points,
+        }
+    });
+    Ok(Json(public_envelope(SCHEMA_DAILY_HISTORY, result)))
 }
 
 fn market_open(now: DateTime<Utc>) -> Option<bool> {
@@ -262,11 +361,13 @@ fn router(provider: Arc<dyn Provider>, universe: Vec<Issuer>, origins: Vec<Heade
         .route("/healthz", get(health))
         .route("/api/quote", get(quote))
         .route("/api/market", get(market))
+        .route("/api/history", get(history))
         .with_state(AppState {
             provider,
             universe: universe.into(),
             index: Symbol::parse("^JKSE").expect("valid composite index"),
             quote_slots: Arc::new(Semaphore::new(4)),
+            history_slots: Arc::new(Semaphore::new(2)),
             market: Arc::new(Mutex::new(None)),
         })
         .layer(middleware::from_fn_with_state(
@@ -434,11 +535,38 @@ mod tests {
 
         async fn history(
             &self,
-            _: &Symbol,
-            _: Period,
-            _: Interval,
+            symbol: &Symbol,
+            period: Period,
+            interval: Interval,
         ) -> idx::Result<Sourced<History>> {
-            unreachable!("API never fetches history")
+            assert_eq!(period, Period::M1);
+            assert_eq!(interval, Interval::Day1);
+            let time = Utc::now().with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap());
+            let candle = idx::model::Candle {
+                time,
+                open: 100.0,
+                high: 125.0,
+                low: 95.0,
+                close: 123.0,
+                adj_close: Some(110.0),
+                volume: 0,
+            };
+            let mut old = candle.clone();
+            old.time -= chrono::Days::new(25);
+            let mut result = Sourced::fresh(
+                History {
+                    symbol: symbol.clone(),
+                    name: None,
+                    currency: Some("IDR".into()),
+                    period,
+                    interval,
+                    candles: vec![old, candle.clone(), candle],
+                    summary: None,
+                },
+                self.name(),
+            );
+            result.cached = true;
+            Ok(result)
         }
 
         async fn fundamentals(&self, _: &Symbol) -> idx::Result<Sourced<idx::model::Fundamentals>> {
@@ -450,6 +578,56 @@ mod tests {
         let mut issuers = universe::load(None).unwrap();
         issuers.truncate(1);
         issuers
+    }
+
+    #[test]
+    fn history_ranges_use_wib_calendar_windows() {
+        let today = NaiveDate::from_ymd_opt(2024, 3, 31).unwrap();
+        for (range, period, start) in [
+            ("3w", Period::M1, "2024-03-11"),
+            ("1mo", Period::M1, "2024-02-29"),
+            ("3mo", Period::M3, "2023-12-31"),
+            ("ytd", Period::Ytd, "2024-01-01"),
+            ("1y", Period::Y1, "2023-03-31"),
+            ("3y", Period::Y5, "2021-03-31"),
+        ] {
+            assert_eq!(
+                history_window(range, today),
+                Some((period, start.parse().unwrap()))
+            );
+        }
+        assert_eq!(history_window("max", today), None);
+    }
+
+    #[tokio::test]
+    async fn history_trims_daily_points_and_preserves_provider_metadata() {
+        let app = router(Arc::new(Fixture(0.into(), false)), one_issuer(), vec![]);
+        let (status, body) = request(app, "/api/history?symbol=bbca.jk&range=3w").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["schema"], SCHEMA_DAILY_HISTORY);
+        assert_eq!(body["cached"], true);
+        assert_eq!(body["data"]["symbol"], "BBCA");
+        assert_eq!(body["data"]["range"], "3w");
+        let points = body["data"]["points"].as_array().unwrap();
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0]["close"], 123.0);
+        assert!(points[0]["volume"].is_null());
+    }
+
+    #[tokio::test]
+    async fn history_rejects_invalid_ranges_and_non_stock_symbols() {
+        let app = router(Arc::new(OfflineProvider), one_issuer(), vec![]);
+        for path in [
+            "/api/history?symbol=BBCA",
+            "/api/history?symbol=BBCA&range=max",
+            "/api/history?symbol=%5EJKSE&range=1mo",
+            "/api/history?symbol=BBCA,BBRI&range=1mo",
+            "/api/history?symbol=BBCA&range=1mo&interval=1m",
+        ] {
+            let (status, body) = request(app.clone(), path).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(body["error"]["code"], "invalid_history_query");
+        }
     }
 
     #[tokio::test]

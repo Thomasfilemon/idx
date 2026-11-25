@@ -133,6 +133,28 @@
                 <div><span>Volume (saham)</span><strong id="detail-volume">—</strong></div>
                 <div><span>Waktu data saham</span><strong id="detail-time">—</strong></div>
               </div>
+              <details id="history-panel" class="history-panel">
+                <summary>Grafik historis</summary>
+                <label for="history-range">Rentang waktu</label>
+                <select id="history-range"><option value="3w">3 minggu</option><option value="1mo" selected>1 bulan</option><option value="3mo">3 bulan</option><option value="ytd">YTD (sejak awal tahun)</option><option value="1y">1 tahun</option><option value="3y">3 tahun</option></select>
+                <p id="history-status" class="notice" role="status"></p>
+                <button id="history-retry" class="action-button" type="button" hidden>Muat ulang histori</button>
+                <div id="history-data" hidden>
+                  <p id="history-dates" class="notice"></p>
+                  <p class="notice">Bar harian terakhir dapat berubah selama sesi berlangsung.</p>
+                  <figure><figcaption>Harga penutupan dari provider (Rp)</figcaption>
+                    <svg viewBox="0 0 400 116" preserveAspectRatio="none" aria-hidden="true"><path id="history-price-path"></path></svg>
+                    <p id="history-price-range" class="notice"></p>
+                  </figure>
+                  <figure><figcaption>Volume harian (saham)</figcaption>
+                    <svg viewBox="0 0 400 65" preserveAspectRatio="none" aria-hidden="true"><path id="history-volume-path"></path></svg>
+                    <p id="history-volume-range" class="notice"></p>
+                  </figure>
+                  <details><summary>Lihat data harian</summary>
+                    <div class="history-table"><table aria-label="Data historis harian"><thead><tr><th scope="col">Tanggal (WIB)</th><th scope="col">Penutupan (Rp)</th><th scope="col">Volume</th></tr></thead><tbody id="history-rows"></tbody></table></div>
+                  </details>
+                </div>
+              </details>
               <p class="footnote">Data dapat tertunda atau tidak lengkap. Dashboard ini untuk edukasi.</p>
             </section>
           </div>

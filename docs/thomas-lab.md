@@ -26,6 +26,7 @@ existing Rust provider configuration and cache. It listens on
 curl -fsS http://127.0.0.1:8000/healthz
 curl -fsS 'http://127.0.0.1:8000/api/quote?symbols=BBCA,BBRI'
 curl -fsS http://127.0.0.1:8000/api/market
+curl -fsS 'http://127.0.0.1:8000/api/history?symbol=BBCA&range=3w'
 ```
 
 - Health returns `{"ok":true,"service":"idx-api"}` without a provider call.
@@ -39,7 +40,17 @@ curl -fsS http://127.0.0.1:8000/api/market
   the midday break, weekends, and bundled holiday dates. Status is unknown
   outside calendar coverage. `data.market_state` is the provider's reported
   index state. `data.as_of` is the latest stock trade timestamp in the overview.
-- Both envelopes preserve provider attribution, original fetch time, cache
+- History returns `idx.daily-history.v1` for a single IDX stock, with `data.symbol`,
+  `data.range`, and `data.points` (oldest first). Each point has a WIB `date`,
+  provider `close` in IDR, and nullable `volume` in shares. Provider adjustments
+  may vary. Zero volume is exposed as unavailable because some providers use it
+  for missing values. The latest daily bar can still be in progress.
+  Supported ranges are `3w` (21 calendar dates including today), `1mo`, `3mo`,
+  `ytd` (from January 1), `1y`, and `3y`. The API clips provider candles to the
+  requested date window. An empty `points` list means no observations in that
+  window. Malformed queries return 400 `invalid_history_query`. The API allows
+  two concurrent history calls and reuses the provider's history cache.
+- All data envelopes preserve provider attribution, original fetch time, cache
   flags, stale reason, and null values. The REST API replaces free-form
   upstream warning strings with public-safe warnings. A recent fetch can
   contain earlier trade data. The session status describes the current
@@ -71,8 +82,9 @@ global request cap and stricter limits for the market route. Use HTTPS and set
 
 Set the `idx-api-base` meta tag in `web/public/dashboard.html` to the HTTPS
 origin of the independently hosted API. An empty value retains relative
-`/api/*` requests. Demo starts without fetching and Live reports failures
-without falling back to sample prices.
+`/api/*` requests. The dashboard loads market and watchlist data on entry. Open
+Grafik historis in the stock detail panel to request daily history. The chart
+keeps unreported dates blank and offers the underlying records in a table.
 
 ```sh
 docker build -t thomas-idx-api .

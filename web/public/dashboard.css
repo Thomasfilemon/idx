@@ -88,3 +88,17 @@
 #issuer-results:not(:empty) { margin-top: 8px; }
 #issuer-results .stock { overflow-wrap: anywhere; min-height: 44px; }
 #issuer-search > .notice { margin-top: 6px; }
+
+.history-panel { margin-top: 22px; }
+.history-panel summary { min-height: 44px; padding-block: 12px; cursor: pointer; font-weight: 700; }
+.history-panel label { display: block; margin-bottom: 6px; }
+.history-panel select { color: inherit; background: #101923; padding: 10px; min-height: 44px; border: 1px solid #657781; border-radius: 8px; }
+.history-panel .notice { margin-top: 8px; }
+.history-panel figure { margin: 16px 0; }
+.history-panel figcaption { margin-bottom: 8px; }
+.history-panel svg { display: block; width: 100%; border-bottom: 1px solid #657781; }
+#history-price-path { fill: none; stroke: #aff58b; stroke-linecap: round; stroke-width: 2; }
+#history-volume-path { fill: #84bcf9; }
+.history-table { overflow: auto; max-height: 220px; }
+.history-table table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.history-table :is(th, td) { text-align: right; padding: 6px; border-bottom: 1px solid #344454; }

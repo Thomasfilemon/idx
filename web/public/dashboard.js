@@ -105,7 +105,7 @@ function render() {
     const price = document.createElement("div"); price.className = "price"; price.textContent = money(q.price);
     const change = document.createElement("div"); change.className = "change " + cls(q.change_pct); change.textContent = signed(q.change_pct, "%");
     left.append(ticker, company); right.append(price, change); b.append(left, right);
-    b.addEventListener("click", () => { selected = q.symbol; render(); }); return b;
+    b.addEventListener("click", () => { selected = q.symbol; render(); updateHistory(); }); return b;
   });
   $("stocks").replaceChildren(...list);
   if (focusedTicker) list.find(button => button.dataset.ticker === focusedTicker)?.focus({ preventScroll: true });
@@ -280,6 +280,7 @@ $("add-stock").addEventListener("submit", e => {
     symbols.push(s);
   }
   selected = s;
+  updateHistory();
   input.value = "";
   input.removeAttribute("aria-invalid");
   feedback.textContent = "";
@@ -287,4 +288,88 @@ $("add-stock").addEventListener("submit", e => {
 });
 $("explorer-search").addEventListener("input", e => { filter = e.target.value.trim().toUpperCase(); render(); });
 $("explorer-sort").addEventListener("change", e => { sort = allowedSorts.has(e.target.value) ? e.target.value : "symbol"; render(); });
+let historyRequest;
+let historyKey = "";
+function drawHistory(points) {
+  const days = points.map(point => Date.parse(point.date) / 86400000);
+  const closes = points.map(point => point.close);
+  const low = Math.min(...closes), high = Math.max(...closes);
+  const maxVolume = Math.max(0, ...points.map(point => point.volume ?? 0));
+  const span = days.at(-1) - days[0];
+  const x = i => span ? 3 + 394 * (days[i] - days[0]) / span : 200;
+  const y = close => high === low ? 58 : 6 + 104 * (high - close) / (high - low);
+  const width = Math.min(9, 340 / Math.max(1, span));
+  // Plot observations at their calendar dates and leave unreported days blank.
+  $("history-price-path").setAttribute("d", points.map((point, i) =>
+    "M" + x(i) + " " + y(point.close) + "h0.1").join(" "));
+  $("history-volume-path").setAttribute("d", points.map((point, i) => {
+    if (!point.volume) return "";
+    const height = 62 * point.volume / maxVolume;
+    return "M" + (x(i) - width / 2) + " 64v-" + height + "h" + width + "v" + height + "Z";
+  }).join(" "));
+  $("history-dates").textContent = points[0].date + " – " + points.at(-1).date + " · " + points.length + " hari dengan data";
+  $("history-price-range").textContent = "Rentang penutupan · " + money(low) + " – " + money(high);
+  $("history-volume-range").textContent = maxVolume ? "Volume tertinggi · " + number(maxVolume) + " saham" : "Volume tidak tersedia.";
+  const tableRows = points.map(point => {
+    const row = document.createElement("tr");
+    for (const value of [point.date, number(point.close), number(point.volume)]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    return row;
+  });
+  $("history-rows").replaceChildren(...tableRows);
+}
+async function updateHistory(force = false) {
+  if (!$("history-panel").open) {
+    historyRequest?.abort();
+    historyRequest = undefined;
+    historyKey = "";
+    return;
+  }
+  const symbol = selected;
+  const range = $("history-range").value;
+  const key = symbol + ":" + range;
+  if (!force && key === historyKey) return;
+  historyKey = key;
+  historyRequest?.abort();
+  const request = new AbortController();
+  historyRequest = request;
+  const status = $("history-status");
+  $("history-data").hidden = true;
+  $("history-retry").hidden = true;
+  status.textContent = "Memuat histori " + symbol + "…";
+  try {
+    const response = await get("/api/history?" + new URLSearchParams({ symbol, range }), request.signal);
+    if (historyRequest !== request) return;
+    const { data, provider, stale, cached, warnings } = ensureEnvelope(response, "idx.daily-history.v1",
+      data => data?.symbol === symbol && data.range === range && Array.isArray(data.points)
+        && data.points.length <= 1100 && data.points.every((point, i, list) =>
+          typeof point?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(point.date)
+          && Number.isFinite(Date.parse(point.date)) && (!i || list[i - 1].date < point.date)
+          && Number.isFinite(point.close) && point.close > 0
+          && (point.volume === null || (Number.isFinite(point.volume) && point.volume >= 0))));
+    if (!data.points.length) {
+      status.textContent = "Belum ada data historis " + symbol + " untuk rentang ini.";
+      return;
+    }
+    drawHistory(data.points);
+    $("history-data").hidden = false;
+    status.textContent = symbol + " · " + (provider || "Provider tidak diketahui")
+      + (stale ? " · Data lama dari provider" : cached ? " · Respons dari cache" : "")
+      + (warnings?.length ? " · Dapat berisi data tidak lengkap" : "");
+  } catch {
+    if (historyRequest !== request) return;
+    status.textContent = "Histori " + symbol + " belum dapat dimuat.";
+    $("history-retry").hidden = false;
+  }
+}
+$("history-panel").addEventListener("toggle", () => updateHistory());
+$("history-range").addEventListener("change", () => updateHistory());
+$("history-retry").addEventListener("click", () => {
+  $("history-range").focus();
+  updateHistory(true);
+});
+
 load();

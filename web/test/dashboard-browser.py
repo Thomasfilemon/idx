@@ -63,6 +63,15 @@ def smoke(browser, name, width, screenshots):
                 route.fulfill(status=503, json={"error": {"code": "unavailable"}}, headers=cors)
             else:
                 route.fulfill(json=QUOTES, headers=cors)
+        elif url.startswith(f"{API}/api/history?"):
+            range_code = url.rsplit("=", 1)[-1]
+            route.fulfill(headers=cors, json={
+                "schema": "idx.daily-history.v1", **OPTIONS,
+                "data": {"symbol": "BBRI", "range": range_code, "points": [
+                    {"date": "2026-11-19", "close": 3700, "volume": None},
+                    {"date": "2026-11-20", "close": 3750, "volume": 1200},
+                ]},
+            })
         elif url.startswith(f"{SITE}/issuer-catalog.json?"):
             route.fulfill(body=CATALOG, content_type="application/json")
         elif url.startswith(f"{SITE}/") and url[len(SITE):] in ASSETS:
@@ -123,6 +132,14 @@ def smoke(browser, name, width, screenshots):
         "(el) => getComputedStyle(el).gridTemplateColumns.split(' ').length"
     ) == (1 if name == "mobile" else 3)
     assert page.locator("#refresh").evaluate("(el) => el.getBoundingClientRect().height") >= 44
+    page.get_by_text("Grafik historis", exact=True).click()
+    expect(page.get_by_text("Volume tertinggi · 1.200 saham")).to_be_visible()
+    period = page.get_by_label("Rentang waktu")
+    expect(period.locator("option")).to_have_count(6)
+    period.select_option("3y")
+    expect(page.get_by_text("Volume tertinggi · 1.200 saham")).to_be_visible()
+    page.get_by_text("Lihat data harian", exact=True).click()
+    expect(page.get_by_role("table", name="Data historis harian").get_by_role("row")).to_have_count(3)
     assert not errors, errors
     page.locator(".dashboard-shell").screenshot(path=screenshots / f"dashboard-{name}.png")
     page.close()

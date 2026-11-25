@@ -25,7 +25,7 @@ function setup({ fail = false, invalid = false, fetchOverride, marketData = {}, 
     },
   };
   runInNewContext(script, {
-    document, AbortController, setTimeout, clearTimeout,
+    document, AbortController, URLSearchParams, setTimeout, clearTimeout,
     async fetch(url) {
       calls.push(url);
       const override = fetchOverride?.(url);
@@ -293,4 +293,55 @@ test("issuer discovery limits results, ignores outdated searches and can retry a
   await form.submit({ preventDefault() {} });
   assert.equal(elements.get("issuer-results").children.length, 8);
   assert.match(elements.get("issuer-status").textContent, /8 dari 10/);
+});
+
+test("history loads on demand and only displays points for the latest requested range", async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const history = (range, points) => ({ ok: true, json: async () => ({
+    schema: "idx.daily-history.v1", provider: "fixture", stale: true,
+    data: { symbol: "BBCA", range, points },
+  }) });
+  const point = { date: "2026-11-18", close: 123, volume: null };
+  const { elements, calls } = setup({ fetchOverride: url => {
+    if (!url.includes("/history?")) return;
+    return url.endsWith("range=1mo") ? pending : history("3y", [point]);
+  } });
+  await tick();
+  assert.equal(calls.length, 2);
+  const panel = elements.get("history-panel"), range = elements.get("history-range");
+  panel.open = true;
+  range.value = "1mo";
+  const old = panel.toggle();
+  range.value = "3y";
+  await range.change();
+  assert.match(calls.at(-1), /symbol=BBCA&range=3y$/);
+  assert.equal(elements.get("history-data").hidden, false);
+  assert.equal(elements.get("history-rows").children[0].children[2].textContent, "—");
+  assert.match(elements.get("history-status").textContent, /Data lama/);
+  finish(history("1mo", []));
+  await old;
+  assert.equal(elements.get("history-data").hidden, false);
+});
+
+test("history failure offers retry independently of live quote data", async () => {
+  let attempts = 0;
+  const { elements } = setup({ fetchOverride: url => {
+    if (!url.includes("/history?")) return;
+    if (++attempts === 1) return { ok: false, status: 503 };
+    return { ok: true, json: async () => ({
+      schema: "idx.daily-history.v1", data: { symbol: "BBCA", range: "ytd", points: [] },
+    }) };
+  } });
+  await tick();
+  const panel = elements.get("history-panel");
+  panel.open = true;
+  elements.get("history-range").value = "ytd";
+  await panel.toggle();
+  assert.equal(elements.get("history-retry").hidden, false);
+  assert.equal(elements.get("detail-price").textContent, "Rp123");
+  elements.get("history-retry").click();
+  await tick();
+  assert.match(elements.get("history-status").textContent, /Belum ada data historis/);
+  assert.equal(elements.get("history-retry").hidden, true);
 });
