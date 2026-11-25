@@ -40,16 +40,24 @@ curl -fsS 'http://127.0.0.1:8000/api/history?symbol=BBCA&range=3w'
   the midday break, weekends, and bundled holiday dates. Status is unknown
   outside calendar coverage. `data.market_state` is the provider's reported
   index state. `data.as_of` is the latest stock trade timestamp in the overview.
-- History returns `idx.daily-history.v1` for a single IDX stock, with `data.symbol`,
-  `data.range`, and `data.points` (oldest first). Each point has a WIB `date`,
-  provider `close` in IDR, and nullable `volume` in shares. Provider adjustments
-  may vary. Zero volume is exposed as unavailable because some providers use it
-  for missing values. The latest daily bar can still be in progress.
-  Supported ranges are `3w` (21 calendar dates including today), `1mo`, `3mo`,
-  `ytd` (from January 1), `1y`, and `3y`. The API clips provider candles to the
-  requested date window. An empty `points` list means no observations in that
-  window. Malformed queries return 400 `invalid_history_query`. The API allows
-  two concurrent history calls and reuses the provider's history cache.
+- History returns `idx.daily-history.v1` with `data.symbol`, `data.range`, nullable
+  provider `data.currency`, and `data.points` (oldest first). Each point has a
+  trading `date` in WIB, a WIB `bar_time` (bar timestamp, not closing time),
+  provider `close`, optional provider `adjusted_close`, nullable `volume` in shares,
+  and `provisional`. The dashboard plots `close` and labels its currency only if
+  reported. For Yahoo's adjustments see [Yahoo Help](https://help.yahoo.com/kb/SLN28256.html).
+  Adjusted values are never inferred from another field. Zero volume remains
+  unavailable because some providers use it to represent missing volume.
+- The API keeps the latest timestamp per WIB trading date and excludes rows
+  outside the requested window or after the provider fetch date. A point is
+  provisional if its session had not ended at the source fetch time according
+  to the bundled IDX calendar. Outside calendar coverage, same-day data is
+  marked conservatively. This flag cannot confirm the provider has finalized or
+  validated its data after the session ends. Missing days remain blank.
+- History ranges are `3w` (21 calendar dates including today), `1mo`, `3mo`,
+  `ytd` (from January 1), `1y`, and `3y`. An empty point list means no
+  observations. Malformed requests return 400 `invalid_history_query`.
+  History has two concurrent provider slots and reuses the provider cache.
 - All data envelopes preserve provider attribution, original fetch time, cache
   flags, stale reason, and null values. The REST API replaces free-form
   upstream warning strings with public-safe warnings. A recent fetch can
@@ -85,7 +93,7 @@ origin of the independently hosted API. An empty value retains relative
 `/api/*` requests. The dashboard loads market and watchlist data on entry. Open
 Grafik historis in the stock detail panel to request daily history. The chart
 keeps unreported dates blank and offers the underlying records in a table.
-Use the header language selector to switch the dashboard between Indonesian
+Use the ID / EN selector in the header to switch the dashboard between Indonesian
 and English. Number and timestamp formatting follow the selected language,
 while market timestamps remain in Jakarta time. The browser remembers the
 preference when local storage is available.

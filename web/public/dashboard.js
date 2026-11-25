@@ -317,11 +317,19 @@ $("add-stock").addEventListener("submit", e => {
 });
 $("explorer-search").addEventListener("input", e => { filter = e.target.value.trim().toUpperCase(); render(); });
 $("explorer-sort").addEventListener("change", e => { sort = allowedSorts.has(e.target.value) ? e.target.value : "symbol"; render(); });
-let historyPoints;
+let historyData;
 let historyRequest;
 let historyKey = "";
-function drawHistory(points) {
-  const days = points.map(point => Date.parse(point.date) / 86400000);
+function calendarDay(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value
+    ? timestamp / 86400000 : null;
+}
+const historyPrice = (value, currency) => currency === "IDR" ? money(value)
+  : number(value) + (currency && Number.isFinite(value) ? " " + currency : "");
+function drawHistory({ points, currency }) {
+  const days = points.map(point => calendarDay(point.date));
   const closes = points.map(point => point.close);
   const low = Math.min(...closes), high = Math.max(...closes);
   const maxVolume = Math.max(0, ...points.map(point => point.volume ?? 0));
@@ -337,12 +345,23 @@ function drawHistory(points) {
     const height = 62 * point.volume / maxVolume;
     return "M" + (x(i) - width / 2) + " 64v-" + height + "h" + width + "v" + height + "Z";
   }).join(" "));
-  $("history-dates").textContent = points[0].date + " – " + points.at(-1).date + " · " + points.length + tr(" hari dengan data", " days with data");
-  $("history-price-range").textContent = tr("Rentang penutupan · ", "Closing price range · ") + money(low) + " – " + money(high);
+  $("history-dates").textContent = points[0].date + " – " + points.at(-1).date + " · " + number(points.length) + tr(" hari dengan data", " days with data")
+    + (points.some(point => point.provisional) ? tr(" · * Sesi belum selesai saat data diambil", " · * Session incomplete when fetched") : "");
+  $("history-price-range").textContent = tr("Rentang penutupan · ", "Closing price range · ") + historyPrice(low, currency) + " – " + historyPrice(high, currency);
   $("history-volume-range").textContent = maxVolume ? tr("Volume tertinggi · ", "Highest volume · ") + number(maxVolume) + tr(" saham", " shares") : tr("Volume tidak tersedia.", "Volume unavailable.");
-  const tableRows = points.map(point => {
+  $("history-currency").textContent = currency
+    ? tr("Mata uang · ", "Currency · ") + currency
+    : tr("Mata uang tidak dilaporkan provider.", "Currency not reported by the provider.");
+  const slider = $("history-point");
+  const previousIndex = Number(slider.value);
+  slider.max = String(points.length - 1);
+  slider.value = String(Number.isInteger(previousIndex) && previousIndex >= 0 && previousIndex < points.length
+    ? previousIndex : points.length - 1);
+  slider.disabled = points.length === 1;
+  showHistoryObservation();
+  const tableRows = [...points].reverse().map(point => {
     const row = document.createElement("tr");
-    for (const value of [point.date, number(point.close), number(point.volume)]) {
+    for (const value of [point.date + (point.provisional ? " *" : ""), number(point.close), number(point.adjusted_close), number(point.volume)]) {
       const cell = document.createElement("td");
       cell.textContent = value;
       row.append(cell);
@@ -351,6 +370,23 @@ function drawHistory(points) {
   });
   $("history-rows").replaceChildren(...tableRows);
 }
+function showHistoryObservation() {
+  if (!historyData) return;
+  const { points, currency } = historyData;
+  const slider = $("history-point");
+  const point = points[Number(slider.value)];
+  if (!point) return;
+  const span = calendarDay(points.at(-1).date) - calendarDay(points[0].date);
+  const x = span ? 3 + 394 * (calendarDay(point.date) - calendarDay(points[0].date)) / span : 200;
+  $("history-price-guide").setAttribute("d", "M" + x + " 0v116");
+  $("history-volume-guide").setAttribute("d", "M" + x + " 0v65");
+  const label = point.date + " · " + tr("Penutupan ", "Close ") + historyPrice(point.close, currency)
+    + " · " + tr("Volume ", "Volume ") + number(point.volume)
+    + (point.provisional ? tr(" · Sementara saat data diambil (*)", " · Provisional when fetched (*)") : "");
+  slider.setAttribute("aria-valuetext", label);
+  $("history-observation").textContent = label;
+}
+$("history-point").addEventListener("input", showHistoryObservation);
 async function updateHistory(force = false) {
   if (!$("history-panel").open) {
     historyRequest?.abort();
@@ -367,30 +403,35 @@ async function updateHistory(force = false) {
   const request = new AbortController();
   historyRequest = request;
   const status = $("history-status");
-  historyPoints = undefined;
+  historyData = undefined;
   $("history-data").hidden = true;
   $("history-retry").hidden = true;
   setLocalizedMessage(status, () => tr("Memuat histori ", "Loading history for ") + symbol + "…");
   try {
     const response = await get("/api/history?" + new URLSearchParams({ symbol, range }), request.signal);
     if (historyRequest !== request) return;
-    const { data, provider, stale, cached, warnings } = ensureEnvelope(response, "idx.daily-history.v1",
+    const { data, provider, stale, cached, warnings, fetched_at } = ensureEnvelope(response, "idx.daily-history.v1",
       data => data?.symbol === symbol && data.range === range && Array.isArray(data.points)
+        && (data.currency == null || (typeof data.currency === "string" && /^[A-Z]{3}$/.test(data.currency)))
         && data.points.length <= 1100 && data.points.every((point, i, list) =>
-          typeof point?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(point.date)
-          && Number.isFinite(Date.parse(point.date)) && (!i || list[i - 1].date < point.date)
+          calendarDay(point?.date) !== null && (!i || list[i - 1].date < point.date)
           && Number.isFinite(point.close) && point.close > 0
-          && (point.volume === null || (Number.isFinite(point.volume) && point.volume >= 0))));
+          && (point.volume === null || (Number.isInteger(point.volume) && point.volume >= 0))
+          && (point.adjusted_close == null || (Number.isFinite(point.adjusted_close) && point.adjusted_close > 0))
+          && (point.provisional === undefined || typeof point.provisional === "boolean")));
     if (!data.points.length) {
       setLocalizedMessage(status, () => tr("Belum ada data historis ", "No historical data for ") + symbol + tr(" untuk rentang ini.", " in this range."));
       return;
     }
-    historyPoints = data.points;
-    drawHistory(historyPoints);
+    historyData = data;
+    $("history-point").max = String(data.points.length - 1);
+    $("history-point").value = String(data.points.length - 1);
+    drawHistory(historyData);
     $("history-data").hidden = false;
     setLocalizedMessage(status, () => symbol + " · " + (provider || tr("Provider tidak diketahui", "Unknown provider"))
       + (stale ? tr(" · Data lama dari provider", " · Stale provider data") : cached ? tr(" · Respons dari cache", " · Cached response") : "")
-      + (warnings?.length ? tr(" · Dapat berisi data tidak lengkap", " · Data may be incomplete") : ""));
+      + (warnings?.length ? tr(" · Dapat berisi data tidak lengkap", " · Data may be incomplete") : "")
+      + (fetched_at ? tr(" · Diambil ", " · Fetched ") + date(fetched_at) : ""));
   } catch {
     if (historyRequest !== request) return;
     setLocalizedMessage(status, () => tr("Histori ", "History for ") + symbol + tr(" belum dapat dimuat.", " could not be loaded."));
@@ -424,7 +465,7 @@ function applyLanguage() {
   setFormats();
   staticCopy.forEach(update => update());
   for (const [element, message] of localizedMessages) element.textContent = message();
-  if (historyPoints && !$("history-data").hidden) drawHistory(historyPoints);
+  if (historyData && !$("history-data").hidden) drawHistory(historyData);
 }
 $("dashboard-language").addEventListener("change", event => {
   language = event.target.value === "en" ? "en" : "id";

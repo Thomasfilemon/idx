@@ -41,9 +41,10 @@ ASSETS = {
 
 
 def smoke(browser, name, width, screenshots):
+    mobile = width <= 620
     page = browser.new_page(
         viewport={"width": width, "height": 900}, locale="id-ID",
-        has_touch=name == "mobile", is_mobile=name == "mobile", reduced_motion="reduce",
+        has_touch=mobile, is_mobile=mobile, reduced_motion="reduce",
     )
     errors = []
     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -67,9 +68,9 @@ def smoke(browser, name, width, screenshots):
             range_code = url.rsplit("=", 1)[-1]
             route.fulfill(headers=cors, json={
                 "schema": "idx.daily-history.v1", **OPTIONS,
-                "data": {"symbol": "BBRI", "range": range_code, "points": [
-                    {"date": "2026-11-19", "close": 3700, "volume": None},
-                    {"date": "2026-11-20", "close": 3750, "volume": 1200},
+                "data": {"symbol": "BBRI", "range": range_code, "currency": "IDR", "points": [
+                    {"date": "2026-11-19", "close": 3700, "volume": None, "adjusted_close": 3650},
+                    {"date": "2026-11-20", "close": 3750, "volume": 1200, "provisional": True},
                 ]},
             })
         elif url.startswith(f"{SITE}/issuer-catalog.json?"):
@@ -127,10 +128,10 @@ def smoke(browser, name, width, screenshots):
     assert page.locator(".explorer-controls").evaluate("(el) => el.scrollWidth <= el.clientWidth")
     assert page.locator(".insights-grid").evaluate(
         "(el) => getComputedStyle(el).gridTemplateColumns.split(' ').length"
-    ) == (2 if name == "mobile" else 4)
+    ) == (2 if mobile else 4)
     assert page.locator(".movers-grid").evaluate(
         "(el) => getComputedStyle(el).gridTemplateColumns.split(' ').length"
-    ) == (1 if name == "mobile" else 3)
+    ) == (1 if mobile else 3)
     assert page.locator("#refresh").evaluate("(el) => el.getBoundingClientRect().height") >= 44
     page.get_by_text("Grafik historis", exact=True).click()
     expect(page.get_by_text("Volume tertinggi · 1.200 saham")).to_be_visible()
@@ -140,17 +141,29 @@ def smoke(browser, name, width, screenshots):
     expect(page.get_by_text("Volume tertinggi · 1.200 saham")).to_be_visible()
     page.get_by_text("Lihat data harian", exact=True).click()
     expect(page.get_by_role("table", name="Data historis harian").get_by_role("row")).to_have_count(3)
+    observation = page.get_by_role("slider", name="Lihat data per hari")
+    expect(observation).to_have_attribute("aria-valuetext", "2026-11-20 · Penutupan Rp3.750 · Volume 1.200 · Sementara saat data diambil (*)")
+    observation.press("Home")
+    expect(observation).to_have_attribute("aria-valuetext", "2026-11-19 · Penutupan Rp3.700 · Volume —")
+    assert page.locator(".dashboard-shell").evaluate("(el) => el.scrollWidth <= el.clientWidth")
+    assert page.locator(".site-header").evaluate("(el) => el.scrollWidth <= el.clientWidth")
     language = page.get_by_role("combobox", name="Bahasa")
+    expect(language.locator("option")).to_have_text(["ID", "EN"])
     language.select_option("en")
     expect(page.locator("html")).to_have_attribute("lang", "en")
     expect(page.get_by_text("Historical chart", exact=True)).to_be_visible()
     expect(page.get_by_text("Highest volume · 1,200 shares")).to_be_visible()
     expect(page.get_by_role("table", name="Daily historical records")).to_be_visible()
     assert quote_requests == 3
+    expect(page.get_by_role("slider", name="Inspect a trading day")).to_have_attribute(
+        "aria-valuetext", "2026-11-19 · Close Rp3,700 · Volume —"
+    )
+    page.locator(".dashboard-shell").screenshot(path=screenshots / f"dashboard-{name}.png")
+    page.reload()
+    expect(page.get_by_role("combobox", name="Language")).to_have_value("en")
     page.get_by_role("combobox", name="Language").select_option("id")
     expect(page.get_by_text("Grafik historis", exact=True)).to_be_visible()
     assert not errors, errors
-    page.locator(".dashboard-shell").screenshot(path=screenshots / f"dashboard-{name}.png")
     page.close()
     print(f"{name}: layout, keyboard interaction and recovery passed", flush=True)
 
@@ -163,6 +176,7 @@ if __name__ == "__main__":
     args.screenshots.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=args.chrome)
+        smoke(browser, "mobile-compact", 320, args.screenshots)
         smoke(browser, "mobile", 390, args.screenshots)
         smoke(browser, "desktop", 1440, args.screenshots)
         browser.close()

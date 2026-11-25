@@ -317,7 +317,7 @@ test("history loads on demand and only displays points for the latest requested 
   await range.change();
   assert.match(calls.at(-1), /symbol=BBCA&range=3y$/);
   assert.equal(elements.get("history-data").hidden, false);
-  assert.equal(elements.get("history-rows").children[0].children[2].textContent, "—");
+  assert.equal(elements.get("history-rows").children[0].children[3].textContent, "—");
   assert.match(elements.get("history-status").textContent, /Data lama/);
   finish(history("1mo", []));
   await old;
@@ -360,4 +360,28 @@ test("language switch relabels loaded market data and errors without new provide
   assert.match(elements.get("market-notice").textContent, /Format respons API tidak sesuai/);
   assert.equal(elements.get("detail-title").textContent, "BBCA · Detail saham");
   assert.equal(calls.length, 2);
+});
+
+test("history rejects invalid calendar dates and labels unknown currency without rupiah", async () => {
+  let pointDate = "2026-02-30";
+  const { elements } = setup({ fetchOverride: url => url.includes("/history?") && {
+    ok: true, json: async () => ({
+      schema: "idx.daily-history.v1",
+      data: { symbol: "BBCA", range: "3w", currency: null, points: [
+        { date: pointDate, close: 123, volume: null, adjusted_close: null, provisional: true },
+      ] },
+    }),
+  } });
+  const panel = elements.get("history-panel");
+  panel.open = true;
+  elements.get("history-range").value = "3w";
+  await panel.toggle();
+  assert.equal(elements.get("history-retry").hidden, false);
+  pointDate = "2026-02-27";
+  elements.get("history-retry").click();
+  await tick();
+  assert.equal(elements.get("history-data").hidden, false);
+  assert.match(elements.get("history-currency").textContent, /tidak dilaporkan/);
+  assert.doesNotMatch(elements.get("history-price-range").textContent, /Rp/);
+  assert.match(elements.get("history-point").attributes["aria-valuetext"], /Sementara/);
 });

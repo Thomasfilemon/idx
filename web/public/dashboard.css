@@ -108,3 +108,8 @@
   .site-header { display: grid; grid-template-columns: 1fr auto; height: auto; padding-block: 10px; }
   .site-header .github-link { grid-column: 1 / -1; margin-left: 0; justify-self: start; }
 }
+
+.history-point { display: block; width: 100%; min-height: 44px; accent-color: #aff58b; }
+.history-guide { stroke: #91a7b7; stroke-dasharray: 3 3; stroke-width: 1; }
+.history-table th { position: sticky; top: 0; background: #101923; }
+#dashboard-language { min-width: 48px; }

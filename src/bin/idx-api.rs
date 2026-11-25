@@ -160,13 +160,17 @@ struct HistoryQuery {
 struct DailyHistory {
     symbol: Symbol,
     range: String,
+    currency: Option<String>,
     points: Vec<DailyPoint>,
 }
 
 #[derive(serde::Serialize)]
 struct DailyPoint {
     date: NaiveDate,
+    bar_time: DateTime<chrono::FixedOffset>,
     close: f64,
+    adjusted_close: Option<f64>,
+    provisional: bool,
     volume: Option<u64>,
 }
 
@@ -218,31 +222,57 @@ async fn history(
         return Err(unavailable());
     }
 
-    let result = sourced.map(|mut history| {
-        history.candles.retain(|candle| {
-            (start..=today).contains(&candle.date())
-                && candle.close.is_finite()
-                && candle.close > 0.0
-        });
-        history.candles.sort_by_key(|candle| candle.time);
-        history.candles.dedup_by_key(|candle| candle.date());
-        let points = history
-            .candles
-            .into_iter()
-            .map(|candle| DailyPoint {
-                date: candle.date(),
-                close: candle.close,
-                // Some providers map missing volume to zero in the shared model.
-                volume: (candle.volume > 0).then_some(candle.volume),
-            })
-            .collect();
-        DailyHistory {
-            symbol,
-            range: query.range,
-            points,
-        }
+    let fetched_at = sourced.fetched_at;
+    let result = sourced.map(|history| DailyHistory {
+        symbol,
+        range: query.range,
+        currency: history.currency.and_then(|currency| {
+            let code = currency.trim().to_ascii_uppercase();
+            (code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_uppercase())).then_some(code)
+        }),
+        points: daily_points(history.candles, start, today, fetched_at),
     });
     Ok(Json(public_envelope(SCHEMA_DAILY_HISTORY, result)))
+}
+
+fn daily_points(
+    mut candles: Vec<idx::model::Candle>,
+    start: NaiveDate,
+    today: NaiveDate,
+    fetched_at: DateTime<Utc>,
+) -> Vec<DailyPoint> {
+    let wib = idx::model::wib();
+    let fetched_date = fetched_at.with_timezone(&wib).date_naive();
+    let last_complete =
+        holidays::covers(fetched_date.year()).then(|| holidays::latest_session(fetched_at));
+    candles.retain(|candle| {
+        let date = candle.time.with_timezone(&wib).date_naive();
+        (start..=today.min(fetched_date)).contains(&date)
+            && candle.close.is_finite()
+            && candle.close > 0.0
+    });
+    // Retain the most recent observation when the provider duplicates a date.
+    candles.sort_by_key(|candle| std::cmp::Reverse(candle.time));
+    candles.dedup_by_key(|candle| candle.time.with_timezone(&wib).date_naive());
+    candles
+        .into_iter()
+        .rev()
+        .map(|candle| {
+            let bar_time = candle.time.with_timezone(&wib);
+            let date = bar_time.date_naive();
+            DailyPoint {
+                date,
+                bar_time,
+                close: candle.close,
+                adjusted_close: candle
+                    .adj_close
+                    .filter(|value| value.is_finite() && *value > 0.0),
+                provisional: last_complete.map_or(date == fetched_date, |last| date > last),
+                // Some providers map missing volume to zero in the shared model.
+                volume: (candle.volume > 0).then_some(candle.volume),
+            }
+        })
+        .collect()
 }
 
 fn market_open(now: DateTime<Utc>) -> Option<bool> {
@@ -608,10 +638,55 @@ mod tests {
         assert_eq!(body["cached"], true);
         assert_eq!(body["data"]["symbol"], "BBCA");
         assert_eq!(body["data"]["range"], "3w");
+        assert_eq!(body["data"]["currency"], "IDR");
         let points = body["data"]["points"].as_array().unwrap();
         assert_eq!(points.len(), 1);
         assert_eq!(points[0]["close"], 123.0);
+        assert_eq!(points[0]["adjusted_close"], 110.0);
+        assert!(points[0]["bar_time"].as_str().unwrap().ends_with("+07:00"));
         assert!(points[0]["volume"].is_null());
+    }
+
+    #[test]
+    fn history_normalizes_days_and_marks_intraday_captures() {
+        let candle = |time: &str, close, adj_close, volume| idx::model::Candle {
+            time: time.parse().unwrap(),
+            open: close,
+            high: close,
+            low: close,
+            close,
+            adj_close,
+            volume,
+        };
+        let candles = vec![
+            candle("2026-11-09T02:00:00Z", 100.0, Some(97.0), 100),
+            candle("2026-11-08T18:00:00Z", 95.0, None, 50),
+            candle("2026-11-06T02:00:00Z", 92.0, Some(f64::NAN), 0),
+            candle("2026-11-10T02:00:00Z", 900.0, None, 100),
+        ];
+        let start = NaiveDate::from_ymd_opt(2026, 11, 1).unwrap();
+        let today = NaiveDate::from_ymd_opt(2026, 11, 10).unwrap();
+        let intraday = daily_points(
+            candles.clone(),
+            start,
+            today,
+            "2026-11-09T06:00:00Z".parse().unwrap(),
+        );
+        assert_eq!(intraday.len(), 2);
+        assert_eq!(intraday[0].adjusted_close, None);
+        assert_eq!(intraday[0].volume, None);
+        assert!(!intraday[0].provisional);
+        assert_eq!(intraday[1].date.to_string(), "2026-11-09");
+        assert_eq!(intraday[1].close, 100.0);
+        assert_eq!(intraday[1].adjusted_close, Some(97.0));
+        assert!(intraday[1].provisional);
+        let after_close = daily_points(
+            candles,
+            start,
+            today,
+            "2026-11-09T09:15:00Z".parse().unwrap(),
+        );
+        assert!(!after_close[1].provisional);
     }
 
     #[tokio::test]
