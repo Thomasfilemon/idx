@@ -85,6 +85,10 @@ origin of the independently hosted API. An empty value retains relative
 `/api/*` requests. The dashboard loads market and watchlist data on entry. Open
 Grafik historis in the stock detail panel to request daily history. The chart
 keeps unreported dates blank and offers the underlying records in a table.
+Use the header language selector to switch the dashboard between Indonesian
+and English. Number and timestamp formatting follow the selected language,
+while market timestamps remain in Jakarta time. The browser remembers the
+preference when local storage is available.
 
 ```sh
 docker build -t thomas-idx-api .

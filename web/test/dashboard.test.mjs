@@ -188,7 +188,7 @@ test("contextual retry fetches only the failed panel and shows refresh feedback"
   assert.equal(elements.get("refresh-label").textContent, "Memuat data…");
   assert.equal(elements.get("retry-quotes").hidden, true);
   await tick();
-  assert.equal(elements.get("refresh-label").textContent, "Refresh data");
+  assert.equal(elements.get("refresh-label").textContent, "Perbarui data");
   assert.equal(elements.get("detail-price").textContent, "Rp123");
   assert.equal(calls.filter(url => url.endsWith("/market")).length, 1);
 });
@@ -344,4 +344,20 @@ test("history failure offers retry independently of live quote data", async () =
   await tick();
   assert.match(elements.get("history-status").textContent, /Belum ada data historis/);
   assert.equal(elements.get("history-retry").hidden, true);
+});
+
+test("language switch relabels loaded market data and errors without new provider calls", async () => {
+  const { elements, calls } = setup({ invalid: true });
+  await tick();
+  const language = elements.get("dashboard-language");
+  language.change({ target: { value: "en" } });
+  assert.match(elements.get("market-notice").textContent, /Unexpected API response format/);
+  assert.equal(elements.get("detail-title").textContent, "BBCA · Stock details");
+  assert.equal(elements.get("refresh-label").textContent, "Refresh data");
+  assert.match(elements.get("notice").textContent, /Response received.*WIB/);
+  assert.equal(calls.length, 2);
+  language.change({ target: { value: "id" } });
+  assert.match(elements.get("market-notice").textContent, /Format respons API tidak sesuai/);
+  assert.equal(elements.get("detail-title").textContent, "BBCA · Detail saham");
+  assert.equal(calls.length, 2);
 });

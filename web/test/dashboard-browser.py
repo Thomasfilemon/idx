@@ -99,7 +99,7 @@ def smoke(browser, name, width, screenshots):
     expect(ticker).to_have_attribute("aria-invalid", "true")
     expect(ticker).to_be_focused()
     ticker.fill("")
-    watchlist = page.get_by_role("region", name="Stock watchlist")
+    watchlist = page.get_by_role("region", name="Daftar pantau saham")
     search = watchlist.get_by_role("textbox", name="Cari di watchlist")
     search.fill("Tidak ada")
     expect(page.get_by_text("Tidak ada saham yang cocok dengan pencarian.")).to_be_visible()
@@ -112,7 +112,7 @@ def smoke(browser, name, width, screenshots):
     expect(page.locator("#detail-price")).to_have_text("—")
 
     expect(page.locator("#refresh")).to_have_attribute("aria-disabled", "false")
-    page.get_by_role("button", name="Refresh data").press("Enter")
+    page.get_by_role("button", name="Perbarui data").press("Enter")
     expect(page.locator("#refresh")).to_have_attribute("aria-disabled", "false")
     assert market_requests == 2 and quote_requests == 3
     issuer_query = page.get_by_role("textbox", name="Cari di katalog emiten IDX")
@@ -140,6 +140,15 @@ def smoke(browser, name, width, screenshots):
     expect(page.get_by_text("Volume tertinggi · 1.200 saham")).to_be_visible()
     page.get_by_text("Lihat data harian", exact=True).click()
     expect(page.get_by_role("table", name="Data historis harian").get_by_role("row")).to_have_count(3)
+    language = page.get_by_role("combobox", name="Bahasa")
+    language.select_option("en")
+    expect(page.locator("html")).to_have_attribute("lang", "en")
+    expect(page.get_by_text("Historical chart", exact=True)).to_be_visible()
+    expect(page.get_by_text("Highest volume · 1,200 shares")).to_be_visible()
+    expect(page.get_by_role("table", name="Daily historical records")).to_be_visible()
+    assert quote_requests == 3
+    page.get_by_role("combobox", name="Language").select_option("id")
+    expect(page.get_by_text("Grafik historis", exact=True)).to_be_visible()
     assert not errors, errors
     page.locator(".dashboard-shell").screenshot(path=screenshots / f"dashboard-{name}.png")
     page.close()

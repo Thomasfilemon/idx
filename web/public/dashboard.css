@@ -102,3 +102,9 @@
 .history-table { overflow: auto; max-height: 220px; }
 .history-table table { width: 100%; border-collapse: collapse; font-size: .85rem; }
 .history-table :is(th, td) { text-align: right; padding: 6px; border-bottom: 1px solid #344454; }
+
+.language-select { color: inherit; background: #101923; border: 1px solid #657781; border-radius: 8px; padding: 6px; min-height: 44px; min-width: 0; }
+@media (max-width: 380px) {
+  .site-header { display: grid; grid-template-columns: 1fr auto; height: auto; padding-block: 10px; }
+  .site-header .github-link { grid-column: 1 / -1; margin-left: 0; justify-self: start; }
+}

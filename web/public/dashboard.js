@@ -1,16 +1,37 @@
 const apiBase = document.querySelector('meta[name="idx-api-base"]')?.content.trim().replace(/\/+$/, "") || "";
 const $ = (id) => document.getElementById(id);
-const fmt = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 2 });
+let language = "id";
+try {
+  if (globalThis.localStorage?.getItem("idx-language") === "en") language = "en";
+} catch {
+  // Language remains usable when browser storage is unavailable.
+}
+const tr = (id, en) => language === "en" ? en : id;
+let fmt;
+let dateFmt;
+function setFormats() {
+  const locale = tr("id-ID", "en-GB");
+  fmt = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
+  dateFmt = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Jakarta" });
+}
+setFormats();
+const localizedMessages = new Map();
+function setLocalizedMessage(element, message) {
+  localizedMessages.set(element, message);
+  element.textContent = message();
+}
 const number = (n) => Number.isFinite(n) ? fmt.format(n) : "—";
 const money = (n) => Number.isFinite(n) ? "Rp" + fmt.format(n) : "—";
 const signed = (n, unit = "") => Number.isFinite(n) ? (n > 0 ? "+" : "") + fmt.format(n) + unit : "—";
 const cls = (n) => n > 0 ? "positive" : n < 0 ? "negative" : "";
-const date = (value) => { if (!value) return "—"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "—" : new Intl.DateTimeFormat("id-ID", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Jakarta" }).format(d) + " WIB"; };
+const date = (value) => { if (!value) return "—"; const d = new Date(value); return Number.isNaN(d.getTime()) ? "—" : dateFmt.format(d) + " WIB"; };
 const allowedSorts = new Set(["symbol", "price", "change_pct", "volume"]);
 const normalizeSymbol = (s) => String(s || "").trim().toUpperCase().replace(/\.JK$/, "");
 const validSymbol = (s) => /^[A-Z0-9][A-Z0-9-]{0,11}$/.test(s);
 const ensureEnvelope = (body, schema, isValid) => {
-  if (!body || body.schema !== schema || !isValid(body.data)) throw Error("Format respons API tidak sesuai (" + schema + ")");
+  if (!body || body.schema !== schema || !isValid(body.data)) {
+    throw Error("Schema mismatch", { cause: { schema } });
+  }
   return body;
 };
 const sortRows = (items, sort) => [...items].sort((a, b) => {
@@ -26,20 +47,28 @@ let filter = "", sort = "symbol";
 const marketPanel = { meta: null, loading: false, error: "", controller: null };
 const quotesPanel = { meta: null, loading: false, error: "", controller: null };
 function notice(text) { $("notice").textContent = text; }
+function panelError(error) {
+  if (error.name === "AbortError") return tr("request timeout (55 detik)", "Request timed out (55 seconds)");
+  if (error.cause?.schema) {
+    return tr("Format respons API tidak sesuai (", "Unexpected API response format (") + error.cause.schema + ")";
+  }
+  if (/^HTTP \d{3}$/.test(error.message)) return error.message;
+  return tr("API tidak dapat dihubungi atau memberi respons yang tidak valid", "The API could not be reached or returned an invalid response");
+}
 function metaState(panel) {
-  if (panel.loading) return panel.meta ? "Memperbarui data…" : "Menghubungkan ke API… Server dapat memerlukan waktu untuk aktif.";
+  if (panel.loading) return panel.meta ? tr("Memperbarui data…", "Updating data…") : tr("Menghubungkan ke API… Server dapat memerlukan waktu untuk aktif.", "Connecting to the API… The server may need time to start.");
   if (panel.error) {
-    const message = "Gagal memuat data: " + panel.error + ".";
-    return panel.meta ? message + " Menampilkan data terakhir yang berhasil diambil pada " + date(panel.meta.fetched_at) + "." : message;
+    const message = tr("Gagal memuat data: ", "Could not load data: ") + panelError(panel.error) + ".";
+    return panel.meta ? message + tr(" Menampilkan data terakhir yang berhasil diambil pada ", " Showing the last data received at ") + date(panel.meta.fetched_at) + "." : message;
   }
   const meta = panel.meta;
   if (!meta) return "";
   const state = [];
-  if (meta.data?.behind_session === true) state.push("Data tertinggal dari sesi terakhir");
-  else if (meta.stale) state.push("Data lama dari provider");
-  if (meta.cached) state.push("Respons dari cache");
-  if (meta.warnings?.length) state.push("Provider melaporkan keterbatasan data");
-  state.push("Respons diambil " + date(meta.fetched_at));
+  if (meta.data?.behind_session === true) state.push(tr("Data tertinggal dari sesi terakhir", "Data is behind the latest session"));
+  else if (meta.stale) state.push(tr("Data lama dari provider", "Stale provider data"));
+  if (meta.cached) state.push(tr("Respons dari cache", "Cached response"));
+  if (meta.warnings?.length) state.push(tr("Provider melaporkan keterbatasan data", "The provider reported limited data"));
+  state.push(tr("Respons diambil ", "Response received ") + date(meta.fetched_at));
   return state.join(" · ");
 }
 function renderInsights() {
@@ -52,8 +81,8 @@ function renderInsights() {
     $("breadth-" + key).style.width = classified ? (100 * counts[i] / classified) + "%" : "0%";
   }
   $("breadth-caption").textContent = Number.isFinite(market?.quoted) && Number.isFinite(market?.universe)
-    ? "Snapshot · " + number(market.quoted) + " dari " + number(market.universe) + " saham tercakup"
-    : "Cakupan snapshot pasar belum tersedia.";
+    ? "Snapshot · " + number(market.quoted) + tr(" dari ", " of ") + number(market.universe) + tr(" saham tercakup", " stocks covered")
+    : tr("Cakupan snapshot pasar belum tersedia.", "Market snapshot coverage unavailable.");
 
   for (const key of ["gainers", "losers", "most_active"]) {
     const items = Array.isArray(market?.[key]) ? market[key].slice(0, 5) : [];
@@ -67,7 +96,7 @@ function renderInsights() {
         metric.className = "activity-metric";
         metric.append(money(item.value));
         const volume = document.createElement("small");
-        volume.textContent = number(item.volume) + (Number.isFinite(item.volume) ? " saham" : "");
+        volume.textContent = number(item.volume) + (Number.isFinite(item.volume) ? tr(" saham", " shares") : "");
         metric.append(volume);
       } else {
         metric.className = cls(item.change_pct);
@@ -79,7 +108,7 @@ function renderInsights() {
     if (!nodes.length) {
       const empty = document.createElement("p");
       empty.className = "movers-empty";
-      empty.textContent = marketPanel.loading ? "Memuat data pasar…" : "Data belum tersedia";
+      empty.textContent = marketPanel.loading ? tr("Memuat data pasar…", "Loading market data…") : tr("Data belum tersedia", "Data unavailable");
       nodes.push(empty);
     }
     $(key + "-list").replaceChildren(...nodes);
@@ -101,7 +130,7 @@ function render() {
     b.className = "stock" + (q.symbol === selected ? " selected" : "");
     const left = document.createElement("div"), right = document.createElement("div"); right.className = "stock-right";
     const ticker = document.createElement("div"); ticker.className = "ticker"; ticker.textContent = q.symbol;
-    const company = document.createElement("div"); company.className = "company"; company.textContent = q.name || "Nama belum tersedia";
+    const company = document.createElement("div"); company.className = "company"; company.textContent = q.name || tr("Nama belum tersedia", "Name unavailable");
     const price = document.createElement("div"); price.className = "price"; price.textContent = money(q.price);
     const change = document.createElement("div"); change.className = "change " + cls(q.change_pct); change.textContent = signed(q.change_pct, "%");
     left.append(ticker, company); right.append(price, change); b.append(left, right);
@@ -109,10 +138,10 @@ function render() {
   });
   $("stocks").replaceChildren(...list);
   if (focusedTicker) list.find(button => button.dataset.ticker === focusedTicker)?.focus({ preventScroll: true });
-  $("empty").textContent = !visible.length && !quotesPanel.loading && !quotesPanel.error ? (filter && rows.length ? "Tidak ada saham yang cocok dengan pencarian." : "Data saham belum tersedia.") : "";
+  $("empty").textContent = !visible.length && !quotesPanel.loading && !quotesPanel.error ? (filter && rows.length ? tr("Tidak ada saham yang cocok dengan pencarian.", "No stocks match your search.") : tr("Data saham belum tersedia.", "Stock data is unavailable.")) : "";
   const q = rows.find(x => x.symbol === selected);
-  $("detail-title").textContent = selected + " · Detail saham";
-  $("detail-name").textContent = q?.name || "Data belum tersedia";
+  $("detail-title").textContent = selected + tr(" · Detail saham", " · Stock details");
+  $("detail-name").textContent = q?.name || tr("Data belum tersedia", "Data unavailable");
   $("detail-source").textContent = quotesPanel.meta?.provider || "—";
   $("detail-price").textContent = money(q?.price);
   $("detail-change").textContent = quoteChange(q?.change, q?.change_pct);
@@ -123,19 +152,19 @@ function render() {
   $("ihsg").textContent = number(ix?.price);
   $("ihsg-change").textContent = quoteChange(ix?.change, ix?.change_pct);
   $("ihsg-change").className = "delta " + cls(ix?.change_pct);
-  $("market-status").textContent = marketPanel.error ? "Status sesi belum diperbarui" : market?.market_open === true ? "Pasar buka" : market?.market_open === false ? "Pasar tutup" : "Status sesi belum diketahui";
-  $("updated").textContent = "Waktu data pasar · " + date(market?.as_of);
+  $("market-status").textContent = marketPanel.error ? tr("Status sesi belum diperbarui", "Session status has not been refreshed") : market?.market_open === true ? tr("Pasar buka", "Market open") : market?.market_open === false ? tr("Pasar tutup", "Market closed") : tr("Status sesi belum diketahui", "Session status unknown");
+  $("updated").textContent = tr("Waktu data pasar · ", "Market data time · ") + date(market?.as_of);
   $("market-source").textContent = "Provider · " + (marketPanel.meta?.provider || "—");
-  $("mode").textContent = marketPanel.loading ? "Memuat data pasar…" : marketPanel.error ? (marketPanel.meta ? "Snapshot sebelumnya" : "Data pasar tidak tersedia")
-    : marketPanel.meta?.stale || market?.behind_session ? "Data pasar tertunda" : "Snapshot pasar";
+  $("mode").textContent = marketPanel.loading ? tr("Memuat data pasar…", "Loading market data…") : marketPanel.error ? (marketPanel.meta ? tr("Snapshot sebelumnya", "Previous snapshot") : tr("Data pasar tidak tersedia", "Market data unavailable"))
+    : marketPanel.meta?.stale || market?.behind_session ? tr("Data pasar tertunda", "Market data delayed") : tr("Snapshot pasar", "Market snapshot");
   const loading = marketPanel.loading || quotesPanel.loading;
   $("refresh").setAttribute("aria-disabled", String(loading));
-  $("refresh-label").textContent = loading ? "Memuat data…" : "Refresh data";
+  $("refresh-label").textContent = loading ? tr("Memuat data…", "Loading data…") : tr("Perbarui data", "Refresh data");
   $("retry-market").hidden = !marketPanel.error;
   $("retry-quotes").hidden = !quotesPanel.error;
   $("market-notice").textContent = metaState(marketPanel);
   const missing = quotesPanel.meta && !quotesPanel.loading && !quotesPanel.error ? symbols.filter(s => !rows.some(q => q.symbol === s)) : [];
-  notice(metaState(quotesPanel) + (missing.length ? " · Tidak ditemukan: " + missing.join(", ") : ""));
+  notice(metaState(quotesPanel) + (missing.length ? tr(" · Tidak ditemukan: ", " · Not found: ") + missing.join(", ") : ""));
 }
 async function get(path, signal, base = apiBase) {
   const timeout = new AbortController();
@@ -164,7 +193,7 @@ async function loadPanel(panel, path, schema, isValid, accept) {
     accept(body.data);
   } catch (e) {
     if (panel.controller !== controller) return;
-    panel.error = e.name === "AbortError" ? "request timeout (55 detik)" : e.message;
+    panel.error = e;
   }
   panel.loading = false;
   render();
@@ -205,7 +234,7 @@ function loadIssuerCatalog() {
 $("issuer-query").addEventListener("input", () => {
   issuerSearchId++;
   $("issuer-results").replaceChildren();
-  $("issuer-status").textContent = "";
+  setLocalizedMessage($("issuer-status"), () => "");
 });
 $("issuer-search").addEventListener("submit", async event => {
   event.preventDefault();
@@ -216,10 +245,10 @@ $("issuer-search").addEventListener("submit", async event => {
   const results = $("issuer-results");
   results.replaceChildren();
   if (query.length < 2) {
-    status.textContent = "Masukkan minimal 2 karakter.";
+    setLocalizedMessage(status, () => tr("Masukkan minimal 2 karakter.", "Enter at least 2 characters."));
     return;
   }
-  status.textContent = "Memuat katalog emiten…";
+  setLocalizedMessage(status, () => tr("Memuat katalog emiten…", "Loading issuer catalog…"));
   try {
     const catalog = await loadIssuerCatalog();
     if (id !== issuerSearchId) return;
@@ -234,16 +263,16 @@ $("issuer-search").addEventListener("submit", async event => {
       button.addEventListener("click", () => {
         $("symbol").value = issuer.symbol;
         $("symbol").removeAttribute("aria-invalid");
-        $("symbol-feedback").textContent = "";
+        setLocalizedMessage($("symbol-feedback"), () => "");
         $("symbol").focus();
       });
       return button;
     });
     results.replaceChildren(...buttons);
-    status.textContent = matches.length ? "Menampilkan " + buttons.length + " dari " + matches.length + " hasil. Pilih emiten untuk mengisi ticker."
-      : "Emiten tidak ditemukan di katalog.";
+    setLocalizedMessage(status, () => matches.length ? tr("Menampilkan ", "Showing ") + buttons.length + tr(" dari ", " of ") + matches.length + tr(" hasil. Pilih emiten untuk mengisi ticker.", " results. Select an issuer to fill the ticker field.")
+      : tr("Emiten tidak ditemukan di katalog.", "No issuers found in the catalog."));
   } catch {
-    if (id === issuerSearchId) status.textContent = "Katalog tidak tersedia. Coba cari lagi atau masukkan ticker secara manual.";
+    if (id === issuerSearchId) setLocalizedMessage(status, () => tr("Katalog tidak tersedia. Coba cari lagi atau masukkan ticker secara manual.", "Catalog unavailable. Try again or enter a ticker manually."));
   }
 });
 $("refresh").addEventListener("click", () => {
@@ -259,7 +288,7 @@ $("retry-quotes").addEventListener("click", () => {
 });
 $("symbol").addEventListener("input", () => {
   $("symbol").removeAttribute("aria-invalid");
-  $("symbol-feedback").textContent = "";
+  setLocalizedMessage($("symbol-feedback"), () => "");
 });
 $("add-stock").addEventListener("submit", e => {
   e.preventDefault();
@@ -267,14 +296,14 @@ $("add-stock").addEventListener("submit", e => {
   const s = normalizeSymbol(input.value);
   const feedback = $("symbol-feedback");
   if (!validSymbol(s)) {
-    feedback.textContent = "Masukkan ticker IDX yang valid, misalnya ASII.";
+    setLocalizedMessage(feedback, () => tr("Masukkan ticker IDX yang valid, misalnya ASII.", "Enter a valid IDX ticker, such as ASII."));
     input.setAttribute("aria-invalid", "true");
     input.focus();
     return;
   }
   if (!symbols.includes(s)) {
     if (symbols.length >= 20) {
-      feedback.textContent = "Watchlist sudah berisi 20 ticker.";
+      setLocalizedMessage(feedback, () => tr("Watchlist sudah berisi 20 ticker.", "The watchlist already contains 20 tickers."));
       return;
     }
     symbols.push(s);
@@ -283,11 +312,12 @@ $("add-stock").addEventListener("submit", e => {
   updateHistory();
   input.value = "";
   input.removeAttribute("aria-invalid");
-  feedback.textContent = "";
+  setLocalizedMessage(feedback, () => "");
   loadQuotes();
 });
 $("explorer-search").addEventListener("input", e => { filter = e.target.value.trim().toUpperCase(); render(); });
 $("explorer-sort").addEventListener("change", e => { sort = allowedSorts.has(e.target.value) ? e.target.value : "symbol"; render(); });
+let historyPoints;
 let historyRequest;
 let historyKey = "";
 function drawHistory(points) {
@@ -307,9 +337,9 @@ function drawHistory(points) {
     const height = 62 * point.volume / maxVolume;
     return "M" + (x(i) - width / 2) + " 64v-" + height + "h" + width + "v" + height + "Z";
   }).join(" "));
-  $("history-dates").textContent = points[0].date + " – " + points.at(-1).date + " · " + points.length + " hari dengan data";
-  $("history-price-range").textContent = "Rentang penutupan · " + money(low) + " – " + money(high);
-  $("history-volume-range").textContent = maxVolume ? "Volume tertinggi · " + number(maxVolume) + " saham" : "Volume tidak tersedia.";
+  $("history-dates").textContent = points[0].date + " – " + points.at(-1).date + " · " + points.length + tr(" hari dengan data", " days with data");
+  $("history-price-range").textContent = tr("Rentang penutupan · ", "Closing price range · ") + money(low) + " – " + money(high);
+  $("history-volume-range").textContent = maxVolume ? tr("Volume tertinggi · ", "Highest volume · ") + number(maxVolume) + tr(" saham", " shares") : tr("Volume tidak tersedia.", "Volume unavailable.");
   const tableRows = points.map(point => {
     const row = document.createElement("tr");
     for (const value of [point.date, number(point.close), number(point.volume)]) {
@@ -337,9 +367,10 @@ async function updateHistory(force = false) {
   const request = new AbortController();
   historyRequest = request;
   const status = $("history-status");
+  historyPoints = undefined;
   $("history-data").hidden = true;
   $("history-retry").hidden = true;
-  status.textContent = "Memuat histori " + symbol + "…";
+  setLocalizedMessage(status, () => tr("Memuat histori ", "Loading history for ") + symbol + "…");
   try {
     const response = await get("/api/history?" + new URLSearchParams({ symbol, range }), request.signal);
     if (historyRequest !== request) return;
@@ -351,17 +382,18 @@ async function updateHistory(force = false) {
           && Number.isFinite(point.close) && point.close > 0
           && (point.volume === null || (Number.isFinite(point.volume) && point.volume >= 0))));
     if (!data.points.length) {
-      status.textContent = "Belum ada data historis " + symbol + " untuk rentang ini.";
+      setLocalizedMessage(status, () => tr("Belum ada data historis ", "No historical data for ") + symbol + tr(" untuk rentang ini.", " in this range."));
       return;
     }
-    drawHistory(data.points);
+    historyPoints = data.points;
+    drawHistory(historyPoints);
     $("history-data").hidden = false;
-    status.textContent = symbol + " · " + (provider || "Provider tidak diketahui")
-      + (stale ? " · Data lama dari provider" : cached ? " · Respons dari cache" : "")
-      + (warnings?.length ? " · Dapat berisi data tidak lengkap" : "");
+    setLocalizedMessage(status, () => symbol + " · " + (provider || tr("Provider tidak diketahui", "Unknown provider"))
+      + (stale ? tr(" · Data lama dari provider", " · Stale provider data") : cached ? tr(" · Respons dari cache", " · Cached response") : "")
+      + (warnings?.length ? tr(" · Dapat berisi data tidak lengkap", " · Data may be incomplete") : ""));
   } catch {
     if (historyRequest !== request) return;
-    status.textContent = "Histori " + symbol + " belum dapat dimuat.";
+    setLocalizedMessage(status, () => tr("Histori ", "History for ") + symbol + tr(" belum dapat dimuat.", " could not be loaded."));
     $("history-retry").hidden = false;
   }
 }
@@ -372,4 +404,37 @@ $("history-retry").addEventListener("click", () => {
   updateHistory(true);
 });
 
+const staticCopy = [];
+for (const [selector, attr] of [
+  ["[data-en]", null], ["[data-en-aria-label]", "aria-label"], ["[data-en-placeholder]", "placeholder"],
+  ["[data-en-content]", "content"],
+]) {
+  for (const element of document.querySelectorAll?.(selector) ?? []) {
+    const id = attr ? element.getAttribute(attr) : element.textContent;
+    const en = element.getAttribute(attr ? "data-en-" + attr : "data-en");
+    staticCopy.push(() => {
+      if (attr) element.setAttribute(attr, tr(id, en));
+      else element.textContent = tr(id, en);
+    });
+  }
+}
+function applyLanguage() {
+  if (document.documentElement) document.documentElement.lang = language;
+  $("dashboard-language").value = language;
+  setFormats();
+  staticCopy.forEach(update => update());
+  for (const [element, message] of localizedMessages) element.textContent = message();
+  if (historyPoints && !$("history-data").hidden) drawHistory(historyPoints);
+}
+$("dashboard-language").addEventListener("change", event => {
+  language = event.target.value === "en" ? "en" : "id";
+  try {
+    globalThis.localStorage?.setItem("idx-language", language);
+  } catch {
+    // Apply the selected language for this page even without storage.
+  }
+  applyLanguage();
+  render();
+});
+applyLanguage();
 load();
