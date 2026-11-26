@@ -117,7 +117,7 @@ deployment. The upstream Worker configuration belongs to the original project.
 
 ## Development and attribution
 
-See the [frontend architecture assessment](frontend-architecture.md) for the
+See the [frontend architecture assessment](https://github.com/Thomasfilemon/idx/blob/development/docs/assessments/frontend-architecture.md) for the
 Phase 3.4 release verification and Phase 3.5 recommendation.
 
 Clone this fork with `git clone https://github.com/Thomasfilemon/idx.git`, check out `development`, and follow [CONTRIBUTING.md](../CONTRIBUTING.md) for local tests. For original CLI/API behavior and data-provider details, consult [the upstream repository](https://github.com/fzn0x/idx). The code remains subject to the existing [LICENSE](../LICENSE). This is a learning project, not financial advice.
