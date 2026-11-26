@@ -303,6 +303,7 @@ mod tests {
             volume: 10,
         };
         let h = History {
+            close_only: Vec::new(),
             symbol: Symbol::parse("BBCA").unwrap(),
             name: Some("multi\nline".into()),
             currency: None,

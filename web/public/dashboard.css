@@ -121,3 +121,7 @@
   .top-nav { display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: 0 1.25rem; }
   .top-nav a { display: inline-flex; align-items: center; min-height: 44px; }
 }
+#financial-chart { height: clamp(260px, 42vh, 440px); width: 100%; position: relative; }
+#financial-chart svg { width: auto; border: 0; }
+#history-data.interactive figure svg { display: none; }
+.detail { min-width: 0; }

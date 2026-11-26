@@ -168,6 +168,9 @@ struct DailyHistory {
 struct DailyPoint {
     date: NaiveDate,
     bar_time: DateTime<chrono::FixedOffset>,
+    open: Option<f64>,
+    high: Option<f64>,
+    low: Option<f64>,
     close: f64,
     adjusted_close: Option<f64>,
     provisional: bool,
@@ -230,13 +233,20 @@ async fn history(
             let code = currency.trim().to_ascii_uppercase();
             (code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_uppercase())).then_some(code)
         }),
-        points: daily_points(history.candles, start, today, fetched_at),
+        points: daily_points(
+            history.candles,
+            history.close_only,
+            start,
+            today,
+            fetched_at,
+        ),
     });
     Ok(Json(public_envelope(SCHEMA_DAILY_HISTORY, result)))
 }
 
 fn daily_points(
-    mut candles: Vec<idx::model::Candle>,
+    candles: Vec<idx::model::Candle>,
+    close_only: Vec<idx::model::CloseObservation>,
     start: NaiveDate,
     today: NaiveDate,
     fetched_at: DateTime<Utc>,
@@ -245,34 +255,51 @@ fn daily_points(
     let fetched_date = fetched_at.with_timezone(&wib).date_naive();
     let last_complete =
         holidays::covers(fetched_date.year()).then(|| holidays::latest_session(fetched_at));
-    candles.retain(|candle| {
-        let date = candle.time.with_timezone(&wib).date_naive();
-        (start..=today.min(fetched_date)).contains(&date)
-            && candle.close.is_finite()
-            && candle.close > 0.0
+    let full = candles.into_iter().map(|c| {
+        let valid = [c.open, c.high, c.low]
+            .iter()
+            .all(|p| p.is_finite() && *p > 0.0)
+            && c.low <= c.open.min(c.close)
+            && c.high >= c.open.max(c.close);
+        (
+            c.time,
+            c.close,
+            c.adj_close,
+            c.volume,
+            valid.then_some((c.open, c.high, c.low)),
+        )
     });
-    // Retain the most recent observation when the provider duplicates a date.
-    candles.sort_by_key(|candle| std::cmp::Reverse(candle.time));
-    candles.dedup_by_key(|candle| candle.time.with_timezone(&wib).date_naive());
-    candles
+    let partial = close_only
         .into_iter()
-        .rev()
-        .map(|candle| {
-            let bar_time = candle.time.with_timezone(&wib);
+        .map(|p| (p.time, p.close, p.adj_close, p.volume, None));
+    let mut points: Vec<_> = full
+        .chain(partial)
+        .filter_map(|(time, close, adj, volume, ohl)| {
+            let bar_time = time.with_timezone(&wib);
             let date = bar_time.date_naive();
-            DailyPoint {
+            if !(start..=today.min(fetched_date)).contains(&date)
+                || !close.is_finite()
+                || close <= 0.0
+            {
+                return None;
+            }
+            Some(DailyPoint {
                 date,
                 bar_time,
-                close: candle.close,
-                adjusted_close: candle
-                    .adj_close
-                    .filter(|value| value.is_finite() && *value > 0.0),
+                open: ohl.map(|p| p.0),
+                high: ohl.map(|p| p.1),
+                low: ohl.map(|p| p.2),
+                close,
+                adjusted_close: adj.filter(|value| value.is_finite() && *value > 0.0),
                 provisional: last_complete.map_or(date == fetched_date, |last| date > last),
-                // Some providers map missing volume to zero in the shared model.
-                volume: (candle.volume > 0).then_some(candle.volume),
-            }
+                volume: (volume > 0).then_some(volume),
+            })
         })
-        .collect()
+        .collect();
+    points.sort_by_key(|p| std::cmp::Reverse(p.bar_time));
+    points.dedup_by_key(|p| p.date);
+    points.reverse();
+    points
 }
 
 fn market_open(now: DateTime<Utc>) -> Option<bool> {
@@ -591,6 +618,7 @@ mod tests {
             old.time = time.checked_sub_days(chrono::Days::new(25)).unwrap();
             let mut result = Sourced::fresh(
                 History {
+                    close_only: Vec::new(),
                     symbol: symbol.clone(),
                     name: None,
                     currency: Some("IDR".into()),
@@ -647,6 +675,9 @@ mod tests {
         assert_eq!(body["data"]["currency"], "IDR");
         let points = body["data"]["points"].as_array().unwrap();
         assert_eq!(points.len(), 1);
+        assert_eq!(points[0]["open"], 100.0);
+        assert_eq!(points[0]["high"], 125.0);
+        assert_eq!(points[0]["low"], 95.0);
         assert_eq!(points[0]["close"], 123.0);
         assert_eq!(points[0]["adjusted_close"], 110.0);
         assert!(points[0]["bar_time"].as_str().unwrap().ends_with("+07:00"));
@@ -674,6 +705,7 @@ mod tests {
         let today = NaiveDate::from_ymd_opt(2026, 11, 10).unwrap();
         let intraday = daily_points(
             candles.clone(),
+            Vec::new(),
             start,
             today,
             "2026-11-09T06:00:00Z".parse().unwrap(),
@@ -688,11 +720,46 @@ mod tests {
         assert!(intraday[1].provisional);
         let after_close = daily_points(
             candles,
+            Vec::new(),
             start,
             today,
             "2026-11-09T09:15:00Z".parse().unwrap(),
         );
         assert!(!after_close[1].provisional);
+    }
+
+    #[test]
+    fn partial_and_inconsistent_bars_preserve_close_without_candlesticks() {
+        let fetched: DateTime<Utc> = "2026-11-09T10:00:00Z".parse().unwrap();
+        let invalid = idx::model::Candle {
+            time: "2026-11-06T09:00:00+07:00".parse().unwrap(),
+            open: 111.0,
+            high: 105.0,
+            low: 90.0,
+            close: 100.0,
+            adj_close: None,
+            volume: 100,
+        };
+        let partial = idx::model::CloseObservation {
+            time: "2026-11-09T09:00:00+07:00".parse().unwrap(),
+            close: 103.0,
+            adj_close: Some(102.0),
+            volume: 0,
+        };
+        let points = daily_points(
+            vec![invalid],
+            vec![partial],
+            "2026-11-01".parse().unwrap(),
+            fetched.date_naive(),
+            fetched,
+        );
+        assert_eq!(points.len(), 2);
+        assert!(points
+            .iter()
+            .all(|p| p.open.is_none() && p.high.is_none() && p.low.is_none()));
+        assert_eq!(points[1].close, 103.0);
+        assert_eq!(points[1].adjusted_close, Some(102.0));
+        assert_eq!(points[1].volume, None);
     }
 
     #[tokio::test]

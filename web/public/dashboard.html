@@ -153,7 +153,12 @@
                 <div id="history-data" hidden>
                   <p id="history-dates" class="notice"></p>
                   <p id="history-currency" class="notice"></p>
-                  <p class="notice" data-en="Prices use the provider close. Adjusted close is listed separately when available.">Grafik memakai harga penutupan provider. Harga penutupan disesuaikan tersedia terpisah jika dikirim provider.</p>
+                  <p class="notice" data-en="Chart uses provider prices. Adjusted close is listed separately when available.">Grafik memakai harga asli provider. Harga penutupan disesuaikan tersedia terpisah jika dikirim provider.</p>
+                  <label for="history-style" data-en="Price chart">Grafik harga</label>
+                  <select id="history-style"><option value="candlestick">Candlestick</option><option value="line" data-en="Line">Garis</option></select>
+                  <p id="history-chart-status" class="notice" role="status"></p>
+                  <div id="financial-chart" hidden></div>
+                  <small><a href="https://www.tradingview.com/" rel="noopener">TradingView Lightweight Charts™ · © 2025 TradingView, Inc.</a></small>
                   <figure><figcaption data-en="Provider closing price">Harga penutupan dari provider</figcaption>
                     <svg viewBox="0 0 400 116" preserveAspectRatio="none" aria-hidden="true"><path id="history-price-path"></path><path id="history-price-guide" class="history-guide"></path></svg>
                     <p id="history-price-range" class="notice"></p>

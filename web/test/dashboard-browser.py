@@ -69,17 +69,18 @@ def smoke(browser, name, width, screenshots):
                 route.fulfill(json=QUOTES, headers=cors)
         elif url.startswith(f"{API}/api/history?"):
             range_code = url.rsplit("=", 1)[-1]
+            ohl = {"open": 3700, "high": 3800, "low": 3650} if range_code == "3mo" else {}
             route.fulfill(headers=cors, json={
                 "schema": "idx.daily-history.v1", **OPTIONS,
                 "data": {"symbol": "BBRI", "range": range_code, "currency": "IDR", "points": [
-                    {"date": "2026-11-19", "close": 3700, "volume": None, "adjusted_close": 3650},
-                    {"date": "2026-11-20", "close": 3750, "volume": 1200, "provisional": True},
+                    {**ohl, "date": "2026-11-19", "close": 3700, "volume": None, "adjusted_close": 3650},
+                    {**ohl, "date": "2026-11-20", "close": 3750, "volume": 1200, "provisional": True},
                 ]},
             })
         elif url.startswith(f"{SITE}/issuer-catalog.json?"):
             route.fulfill(body=CATALOG, content_type="application/json")
         elif url.startswith(f"{SITE}/dashboard/") and url.endswith(".mjs"):
-            module_name = url.rsplit("/", 1)[-1]
+            module_name = url.removeprefix(f"{SITE}/dashboard/")
             route.fulfill(body=(PUBLIC / "dashboard" / module_name).read_text(encoding="utf-8"),
                           content_type="application/javascript; charset=utf-8")
         elif url.startswith(f"{SITE}/") and urlsplit(url).path in (
@@ -196,6 +197,21 @@ def smoke(browser, name, width, screenshots):
     assert "symbol=BBRI&range=3w" in page.url
     page.go_back()
     expect(period).to_have_value("3y")
+    expect(page.locator("#history-style")).to_have_value("line")
+    expect(page.locator("#history-style")).to_be_disabled()
+    expect(page.locator("#financial-chart canvas").first).to_be_visible()
+    period.select_option("3mo")
+    expect(page.locator("#history-style")).to_have_value("candlestick")
+    expect(page.locator("#history-style")).to_be_enabled()
+    canvas = page.locator("#financial-chart canvas").first
+    expect(canvas).to_be_visible()
+    if mobile:
+        page.locator("#financial-chart").tap()
+    page.locator("#financial-chart").hover()
+    page.mouse.wheel(0, -120)
+    page.locator("#history-style").select_option("line")
+    expect(page.locator("#history-data")).to_have_class("interactive")
+    expect(page.locator("#history-observation")).to_contain_text("Tertinggi")
     assert not errors, errors
     page.close()
     print(f"{name}: layout, keyboard interaction and recovery passed", flush=True)

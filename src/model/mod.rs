@@ -653,7 +653,18 @@ pub struct HistorySummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CloseObservation {
+    pub time: DateTime<FixedOffset>,
+    pub close: f64,
+    pub adj_close: Option<f64>,
+    pub volume: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct History {
+    /// Provider closes from incomplete bars, kept separate from analytics candles.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub close_only: Vec<CloseObservation>,
     pub symbol: Symbol,
     pub name: Option<String>,
     pub currency: Option<String>,

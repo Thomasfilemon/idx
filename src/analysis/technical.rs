@@ -541,6 +541,7 @@ mod tests {
     fn analyse_full_report() {
         let closes: Vec<f64> = (0..260).map(|i| 1000.0 + i as f64 * 2.0).collect();
         let h = History {
+            close_only: Vec::new(),
             symbol: Symbol::parse("TEST").unwrap(),
             name: None,
             currency: Some("IDR".into()),

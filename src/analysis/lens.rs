@@ -1407,6 +1407,7 @@ mod tests {
             })
             .collect();
         History {
+            close_only: Vec::new(),
             symbol: sym(symbol),
             name: None,
             currency: None,

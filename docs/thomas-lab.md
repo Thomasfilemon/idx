@@ -50,7 +50,9 @@ curl -fsS 'http://127.0.0.1:8000/api/history?symbol=BBCA&range=3w'
   provider `data.currency`, and `data.points` (oldest first). Each point has a
   trading `date` in WIB, a WIB `bar_time` (bar timestamp, not closing time),
   provider `close`, optional provider `adjusted_close`, nullable `volume` in shares,
-  and `provisional`. The dashboard plots `close` and labels its currency only if
+  and `provisional`. Additive `open`, `high`, and `low` fields contain provider prices.
+  All three are null for incomplete or inconsistent bars. A valid close survives
+  and the entire selected range can be displayed as a line. The chart labels its currency only if
   reported. For Yahoo's adjustments see [Yahoo Help](https://help.yahoo.com/kb/SLN28256.html).
   Adjusted values are never inferred from another field. Zero volume remains
   unavailable because some providers use it to represent missing volume.
@@ -96,9 +98,14 @@ global request cap and stricter limits for the market route. Use HTTPS and set
 
 Set the `idx-api-base` meta tag in `web/public/dashboard.html` to the HTTPS
 origin of the independently hosted API. An empty value retains relative
-`/api/*` requests. The dashboard loads market and watchlist data on entry. Open
-Grafik historis in the stock detail panel to request daily history. The chart
-keeps unreported dates blank and offers the underlying records in a table.
+`/api/*` requests. Pages serves the landing page at `/idx/`, the market panel at
+`/idx/market.html`, and the watchlist and history at
+`/idx/stock.html?symbol=BBCA&range=1mo`. The combined view remains available
+at `/idx/dashboard.html`; the old landing dashboard fragment opens that view.
+Open Grafik historis to fetch a range. Candlestick is the default for complete
+OHLC, and Line uses raw provider closes. The time axis spaces reported sessions
+in order. The volume overlay uses shares. Crosshair, pan, pinch/wheel zoom,
+the keyboard observation slider and the on-demand records table support inspection.
 Use the ID / EN selector in the header to switch the dashboard between Indonesian
 and English. Number and timestamp formatting follow the selected language,
 while market timestamps remain in Jakarta time. The browser remembers the

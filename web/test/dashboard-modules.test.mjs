@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createApi, ensureEnvelope } from "../public/dashboard/api.mjs";
 import { createFormatting } from "../public/dashboard/format.mjs";
-import { calendarDay, validHistory, historyGeometry, historyPosition } from "../public/dashboard/history-data.mjs";
+import { completeOhlc, calendarDay, validHistory, historyGeometry, historyPosition } from "../public/dashboard/history-data.mjs";
 
 test("formatting changes locale without changing Jakarta timezone or null handling", () => {
   const f = createFormatting();
@@ -40,4 +40,13 @@ test("API transport forwards cancellation, including a request aborted before st
   });
   await assert.rejects(api.get("/api/market", controller.signal), { name: "AbortError" });
   assert.throws(() => ensureEnvelope({ schema: "wrong" }, "idx.market.v1", () => true), /Schema mismatch/);
+});
+
+test("candlesticks require observed, coherent prices and accept a genuine flat session", () => {
+  const flat = { open: 100, high: 100, low: 100, close: 100 };
+  assert.ok(completeOhlc(flat));
+  for (const override of [{ low: null }, { open: undefined }, { high: 90 },
+    { low: 110 }, { open: Infinity }, { close: 0 }]) {
+    assert.equal(completeOhlc({ ...flat, ...override }), false);
+  }
 });

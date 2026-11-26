@@ -2916,6 +2916,7 @@ mod tests {
                 self.asked.lock().unwrap().push(p);
                 let mut out = Sourced::fresh(
                     History {
+                        close_only: Vec::new(),
                         symbol: s.clone(),
                         name: None,
                         currency: None,
@@ -3661,6 +3662,7 @@ mod tests {
                     .collect::<Vec<_>>();
                 Ok(Sourced::fresh(
                     History {
+                        close_only: Vec::new(),
                         symbol: s.clone(),
                         name: None,
                         currency: None,

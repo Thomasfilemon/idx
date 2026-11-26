@@ -123,16 +123,11 @@ pub fn parse_chart(body: &str, period: Period, interval: Interval) -> Result<His
     // in-progress or last bar), so such a repeat is dropped too.
     let step = interval.bar_seconds();
     let anchor = ts.iter().flatten().next().copied();
+    let mut close_only = Vec::new();
     let mut candles = Vec::with_capacity(ts.len());
     for (i, t) in ts.iter().enumerate() {
-        let (Some(t), Some(o), Some(h), Some(l), Some(c)) = (
-            *t,
-            open.get(i).copied().flatten(),
-            high.get(i).copied().flatten(),
-            low.get(i).copied().flatten(),
-            close.get(i).copied().flatten(),
-        ) else {
-            continue; // holiday / missing bar
+        let (Some(t), Some(c)) = (*t, close.get(i).copied().flatten()) else {
+            continue;
         };
         if let (Some(step), Some(anchor)) = (step, anchor) {
             let off_grid = t % 60 != 0 || (t - anchor).rem_euclid(step) != 0;
@@ -144,24 +139,40 @@ pub fn parse_chart(body: &str, period: Period, interval: Interval) -> Result<His
         let Some(time) = wib_from_unix(t) else {
             continue;
         };
+        let adj_close = adj.get(i).copied().flatten();
+        let volume = volume
+            .get(i)
+            .copied()
+            .flatten()
+            .map(|v| v.max(0.0) as u64)
+            .unwrap_or(0);
+        let (Some(o), Some(h), Some(l)) = (
+            open.get(i).copied().flatten(),
+            high.get(i).copied().flatten(),
+            low.get(i).copied().flatten(),
+        ) else {
+            close_only.push(crate::model::CloseObservation {
+                time,
+                close: c,
+                adj_close,
+                volume,
+            });
+            continue;
+        };
         candles.push(Candle {
             time,
             open: o,
             high: h,
             low: l,
             close: c,
-            adj_close: adj.get(i).copied().flatten(),
-            volume: volume
-                .get(i)
-                .copied()
-                .flatten()
-                .map(|v| v.max(0.0) as u64)
-                .unwrap_or(0),
+            adj_close,
+            volume,
         });
     }
     candles.sort_by_key(|c| c.time);
 
     Ok(History {
+        close_only,
         symbol,
         name: m.str("longName").or_else(|| m.str("shortName")),
         currency: m.str("currency"),
@@ -384,6 +395,14 @@ mod tests {
     const CHART_404: &str = include_str!("../../../tests/fixtures/yahoo/chart_not_found.json");
     const V7: &str = include_str!("../../../tests/fixtures/yahoo/quote_v7_bbca_bbri_tlkm.json");
     const V7_401: &str = include_str!("../../../tests/fixtures/yahoo/quote_v7_unauthorized.json");
+
+    #[test]
+    fn incomplete_bar_preserves_reported_close() {
+        let h = parse_chart(r#"{"chart":{"result":[{"meta":{"symbol":"BBCA.JK"},"timestamp":[1794261600],"indicators":{"quote":[{"close":[100],"open":[null],"high":[102],"low":[96]}]}}]}}"#, Period::M1, Interval::Day1).unwrap();
+        assert!(h.candles.is_empty());
+        assert_eq!(h.close_only.len(), 1);
+        assert_eq!(h.close_only[0].close, 100.0);
+    }
 
     #[test]
     fn chart_daily() {

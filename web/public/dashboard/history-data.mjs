@@ -41,3 +41,8 @@ export function historyGeometry(points) {
 
   return { low, high, maxVolume, pricePath, volumePath };
 }
+
+export function completeOhlc(p) {
+  return [p.open, p.high, p.low, p.close].every(v => Number.isFinite(v) && v > 0)
+    && p.low <= Math.min(p.open, p.close) && p.high >= Math.max(p.open, p.close);
+}

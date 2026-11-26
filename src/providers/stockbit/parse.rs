@@ -227,17 +227,30 @@ pub fn parse_history(
         .and_then(|p| p.as_array())
         .ok_or_else(|| IdxError::provider(NAME, "chart response had no prices"))?;
     let mut candles: Vec<Candle> = Vec::with_capacity(rows.len());
+    let mut close_only = Vec::new();
     for r in rows {
         let Some(close) = r.get("value").and_then(num) else {
             continue;
         };
         let Some(time) = candle_time(r) else { continue };
-        // Line-type rows leave OHLC empty; fall back to the close so a candle is
-        // never silently zero-filled.
-        let open = r.get("open").and_then(num).unwrap_or(close);
-        let high = r.get("high").and_then(num).unwrap_or(close);
-        let low = r.get("low").and_then(num).unwrap_or(close);
-        let lots = r.get("volume").and_then(nonneg_u64).unwrap_or(0);
+        let volume = r
+            .get("volume")
+            .and_then(nonneg_u64)
+            .unwrap_or(0)
+            .saturating_mul(100);
+        let (Some(open), Some(high), Some(low)) = (
+            r.get("open").and_then(num),
+            r.get("high").and_then(num),
+            r.get("low").and_then(num),
+        ) else {
+            close_only.push(crate::model::CloseObservation {
+                time,
+                close,
+                adj_close: None,
+                volume,
+            });
+            continue;
+        };
         candles.push(Candle {
             time,
             open,
@@ -245,11 +258,12 @@ pub fn parse_history(
             low,
             close,
             adj_close: None,
-            volume: lots.saturating_mul(100),
+            volume,
         });
     }
     let summary = History::summarise(&candles);
     Ok(History {
+        close_only,
         symbol: symbol.clone(),
         name: None,
         currency: Some("IDR".into()),
@@ -303,6 +317,14 @@ mod tests {
         include_str!("../../../tests/fixtures/stockbit/chart_candle_bbca_1y.json");
     const CHART_EMPTY: &str =
         include_str!("../../../tests/fixtures/stockbit/chart_candle_bbca_1d.json");
+
+    #[test]
+    fn incomplete_bar_preserves_reported_close() {
+        let h = parse_history(&sym("BBCA"), Period::M1, Interval::Day1, r#"{"data":{"prices":[{"formatted_date":"2026-11-09","value":"100","high":"102","low":"96","open":""}]}}"#).unwrap();
+        assert!(h.candles.is_empty());
+        assert_eq!(h.close_only.len(), 1);
+        assert_eq!(h.close_only[0].close, 100.0);
+    }
 
     #[test]
     fn number_coercion() {

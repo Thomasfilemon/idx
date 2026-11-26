@@ -3737,6 +3737,7 @@ mod foreign_ipot_tests {
             .collect();
             Ok(Sourced::fresh(
                 History {
+                    close_only: Vec::new(),
                     symbol: s.clone(),
                     name: None,
                     currency: None,

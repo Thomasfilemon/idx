@@ -1,5 +1,5 @@
 import { ensureEnvelope } from "./api.mjs";
-import { validHistory, historyGeometry, historyPosition } from "./history-data.mjs";
+import { validHistory, completeOhlc, historyGeometry, historyPosition } from "./history-data.mjs";
 
 export function createHistoryPanel({ document, api, formatting, i18n, selectedSymbol }) {
   const $ = id => document.getElementById(id);
@@ -10,6 +10,50 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
   let historyRequest;
   let historyKey = "";
   let tableDirty = true;
+  let chart;
+  let chartVersion = 0;
+  let preferredMode = "candlestick";
+  const host = $("financial-chart");
+  function clearChart() {
+    chartVersion++;
+    chart?.remove();
+    chart = undefined;
+    host.hidden = true;
+    $("history-data").classList.remove("interactive");
+  }
+  async function drawChart() {
+    clearChart();
+    const version = chartVersion;
+    const { points } = historyData;
+    const available = points.every(completeOhlc);
+    const mode = available ? preferredMode : "line";
+    const selector = $("history-style");
+    selector.value = mode;
+    selector.disabled = !available;
+    const status = $("history-chart-status");
+    setLocalizedMessage(status, () => available ? "" : tr(
+      "OHLC belum lengkap. Grafik garis memakai harga penutupan.",
+      "OHLC is incomplete. The line chart uses closing prices."));
+    try {
+      const { createFinancialChart } = await import("./financial-chart.mjs");
+      if (chartVersion !== version) return;
+      host.hidden = false;
+      chart = createFinancialChart(host, points, mode, document.documentElement.lang, index => {
+        $("history-point").value = String(index);
+        showHistoryObservation();
+      });
+      $("history-data").classList.add("interactive");
+    } catch {
+      if (chartVersion !== version) return;
+      host.hidden = true;
+      setLocalizedMessage(status, () => tr("Grafik interaktif tidak tersedia. Harga dan volume tersedia di bawah.",
+        "Interactive chart unavailable. Prices and volumes are shown below."));
+    }
+  }
+  $("history-style").addEventListener("change", event => {
+    preferredMode = event.target.value === "line" ? "line" : "candlestick";
+    if (historyData) drawChart();
+  });
   const historyPrice = (value, currency) => currency === "IDR" ? money(value)
     : number(value) + (currency && Number.isFinite(value) ? " " + currency : "");
   function renderLabels({ points, currency }) {
@@ -55,12 +99,18 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     $("history-price-guide").setAttribute("d", "M" + x + " 0v116");
     $("history-volume-guide").setAttribute("d", "M" + x + " 0v65");
     const label = point.date + " · " + tr("Penutupan ", "Close ") + historyPrice(point.close, currency)
+      + (completeOhlc(point) ? " · " + tr("Buka ", "Open ") + historyPrice(point.open, currency)
+        + " · " + tr("Tertinggi ", "High ") + historyPrice(point.high, currency)
+        + " · " + tr("Terendah ", "Low ") + historyPrice(point.low, currency) : "")
       + " · " + tr("Volume ", "Volume ") + number(point.volume)
       + (point.provisional ? tr(" · Sementara saat data diambil (*)", " · Provisional when fetched (*)") : "");
     slider.setAttribute("aria-valuetext", label);
     $("history-observation").textContent = label;
   }
-  $("history-point").addEventListener("input", showHistoryObservation);
+  $("history-point").addEventListener("input", () => {
+    showHistoryObservation();
+    if (historyData) chart?.inspect(historyData.points[Number($("history-point").value)]);
+  });
   $("history-records").addEventListener("toggle", renderTable);
   async function updateHistory(force = false) {
     if (!$("history-panel").open) {
@@ -78,6 +128,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     const request = new AbortController();
     historyRequest = request;
     const status = $("history-status");
+    if (document.defaultView) clearChart();
     historyData = undefined;
     tableDirty = true;
     $("history-rows").replaceChildren();
@@ -101,6 +152,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       $("history-point").value = String(data.points.length - 1);
       renderLabels(historyData);
       $("history-data").hidden = false;
+      if (document.defaultView) drawChart();
       setLocalizedMessage(status, () => symbol + " · " + (provider || tr("Provider tidak diketahui", "Unknown provider"))
         + (stale ? tr(" · Data lama dari provider", " · Stale provider data") : cached ? tr(" · Respons dari cache", " · Cached response") : "")
         + (warnings?.length ? tr(" · Dapat berisi data tidak lengkap", " · Data may be incomplete") : "")
@@ -120,6 +172,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
   return {
     update: updateHistory,
     render: () => {
+      chart?.locale(document.documentElement.lang);
       if (historyData && !$("history-data").hidden) renderLabels(historyData);
     },
   };

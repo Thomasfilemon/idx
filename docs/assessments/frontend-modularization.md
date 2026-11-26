@@ -180,3 +180,47 @@ series alignment with hand-computed fixtures.
 
 This is an implementation plan only. No pages were separated and no technical
 indicator computation or framework migration was performed in Phase 3.6.
+
+## Phase 3.7 and 3.8 decisions
+
+Pages generates four real HTML documents from one shell and shared panel markup
+using Python's standard library at packaging time. Navigation works with native
+links. Each analysis page starts only its own API requests. The stock query
+stores the selected symbol and range and supports browser history.
+
+The interactive price and volume chart uses the self-hosted standalone ES module
+from the lightweight-charts 5.0.9 npm release. The version, license and upstream
+NOTICE are kept alongside the module. Its 182,216 uncompressed JS bytes are
+requested only after history returns data. Users incur no runtime CDN request.
+Keeping the existing SVG alone would require maintaining touch tracking, scales,
+crosshair and viewport interaction ourselves. The accessible slider and records
+remain available independently of canvas. The static price/volume plots also
+remain available if the interactive module fails to initialize. Updating the
+vendored dependency requires repeating browser and licensing checks.
+
+### Phase 4.1 acceptance criteria for approval
+
+For a fixed symbol, basis, provider, fetch and as-of session, propose fetching
+five years of daily source history once for calculation. This covers the longest
+three-year view with up to two years of preceding observations. Seed recursive
+methods from the first eligible contiguous segment in that same source window.
+Calculate each session using only data available through that session, then
+crop the series for display. Switching range or zoom must leave all overlapping
+values identical. Expose the calculation start, as-of date, provider, basis,
+eligible count and method version so values can be reproduced.
+
+Use the existing Rust functions in `src/analysis/technical.rs` and the shared
+technical service used by CLI and MCP. Preserve current semantics for parity:
+SMA20/50/200, SMA-seeded EMA20, Wilder RSI14 from 15 closes (including flat
+series = 100 under the existing zero-loss branch), and MACD(12,26,9) from 35.
+This supersedes the earlier suggested flat-series value of 50. Compare results
+on identical eligible inputs and the same seed, as CLI callers can request a
+different lookback. Require parity fixtures for all three interfaces before
+release. Any change to flat RSI or default CLI/MCP filtering needs separate review.
+
+Default to provider close. Keep adjusted values a separately specified basis
+and never mix bases. Exclude provisional or unknown finality, reset on an
+expected session with missing/invalid price, and surface unknown calendar
+coverage. Return null and a reason until the full minimum is available after
+a reset. Test insufficient IPO history, missing/provisional points, range
+invariance, and no future leakage. This section is an implementation proposal.

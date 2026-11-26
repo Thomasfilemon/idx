@@ -388,6 +388,7 @@ mod tests {
             }
             let mut s = Sourced::fresh(
                 History {
+                    close_only: Vec::new(),
                     symbol: symbol.clone(),
                     name: None,
                     currency: Some("IDR".into()),
