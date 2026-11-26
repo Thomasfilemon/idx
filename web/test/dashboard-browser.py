@@ -76,6 +76,10 @@ def smoke(browser, name, width, screenshots):
             })
         elif url.startswith(f"{SITE}/issuer-catalog.json?"):
             route.fulfill(body=CATALOG, content_type="application/json")
+        elif url.startswith(f"{SITE}/dashboard/") and url.endswith(".mjs"):
+            module_name = url.rsplit("/", 1)[-1]
+            route.fulfill(body=(PUBLIC / "dashboard" / module_name).read_text(encoding="utf-8"),
+                          content_type="application/javascript; charset=utf-8")
         elif url.startswith(f"{SITE}/") and url[len(SITE):] in ASSETS:
             path, content_type = ASSETS[url[len(SITE):]]
             body = (PUBLIC / path).read_text(encoding="utf-8")
@@ -143,6 +147,7 @@ def smoke(browser, name, width, screenshots):
     expect(period.locator("option")).to_have_count(6)
     period.select_option("3y")
     expect(page.get_by_text("Volume tertinggi · 1.200 saham")).to_be_visible()
+    expect(page.locator("#history-rows tr")).to_have_count(0)
     page.get_by_text("Lihat data harian", exact=True).click()
     expect(page.get_by_role("table", name="Data historis harian").get_by_role("row")).to_have_count(3)
     observation = page.get_by_role("slider", name="Lihat data per hari")

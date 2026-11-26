@@ -8,6 +8,7 @@ on:
       - 'web/public/dashboard.html'
       - 'web/public/dashboard.css'
       - 'web/public/dashboard.js'
+      - 'web/public/dashboard/**'
       - 'data/universe.csv'
       - 'web/scripts/issuer-catalog.py'
       - '.github/workflows/deploy-dashboard-pages.yml'
@@ -41,6 +42,10 @@ jobs:
           cp web/public/dashboard.html _site/dashboard.html
           cp web/public/dashboard.css _site/dashboard.css
           cp web/public/dashboard.js _site/dashboard.js
+          # A release-specific module directory prevents mixed cached module graphs.
+          cp -R web/public/dashboard "_site/dashboard-${GITHUB_SHA}"
+          sed -i "s|\./dashboard/|./dashboard-${GITHUB_SHA}/|g" _site/dashboard.js
+          test -s "_site/dashboard-${GITHUB_SHA}/app.mjs"
           python3 web/scripts/issuer-catalog.py > _site/issuer-catalog.json
           touch _site/.nojekyll
           test -s _site/index.html

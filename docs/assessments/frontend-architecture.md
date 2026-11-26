@@ -41,7 +41,7 @@ ranking label on the side that did not fall back.
   envelope validation, independent market/quote request state, issuer search,
   watchlist, the chart inspector, and localization. HTML/CSS/JS total 64,987
   source bytes. The same files compressed individually with local gzip total
-  about 16.6 KiB. This excludes network headers, fonts, and API responses.
+  about 18.6 KiB. This excludes network headers, fonts, and API responses.
 - The main render path rerenders breadth, movers, and watchlist on a watchlist
   filter change and rebuilds stock buttons while restoring focus. History has
   its own request guard and rendering path. Opening a long range builds all

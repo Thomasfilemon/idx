@@ -1,31 +1,30 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { runInNewContext } from "node:vm";
+import { initDashboard } from "../public/dashboard/app.mjs";
 
-const script = readFileSync(new URL("../public/dashboard.js", import.meta.url), "utf8");
 function setup({ fail = false, invalid = false, fetchOverride, marketData = {}, marketMeta = {} } = {}) {
   const elements = new Map(), calls = [];
+  let created = 0;
   const element = () => ({
     textContent: "", value: "", disabled: false, children: [], style: {}, dataset: {}, attributes: {},
     setAttribute(name, value) { this.attributes[name] = value; },
     removeAttribute(name) { delete this.attributes[name]; },
     focus() { document.activeElement = this; this.focused = true; },
     append(...children) { this.children.push(...children); },
-    replaceChildren(...children) { this.children = children; },
+    replaceChildren(...children) { this.children = children; this.replacements = (this.replacements || 0) + 1; },
     addEventListener(name, handler) { this[name] = handler; },
 
   });
   const document = {
     querySelector: () => ({ content: "https://api.example.test/" }),
-    createElement: element,
+    createElement: () => { created++; return element(); },
     getElementById(id) {
       if (!elements.has(id)) elements.set(id, element());
       return elements.get(id);
     },
   };
-  runInNewContext(script, {
-    document, AbortController, URLSearchParams, setTimeout, clearTimeout,
+  initDashboard({
+    document,
     async fetch(url) {
       calls.push(url);
       const override = fetchOverride?.(url);
@@ -45,7 +44,7 @@ function setup({ fail = false, invalid = false, fetchOverride, marketData = {}, 
       } };
     }
   });
-  return { elements, calls };
+  return { elements, calls, created: () => created };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
@@ -317,6 +316,9 @@ test("history loads on demand and only displays points for the latest requested 
   await range.change();
   assert.match(calls.at(-1), /symbol=BBCA&range=3y$/);
   assert.equal(elements.get("history-data").hidden, false);
+  assert.equal(elements.get("history-rows").children.length, 0);
+  elements.get("history-records").open = true;
+  elements.get("history-records").toggle();
   assert.equal(elements.get("history-rows").children[0].children[3].textContent, "—");
   assert.match(elements.get("history-status").textContent, /Data lama/);
   finish(history("1mo", []));
@@ -384,4 +386,56 @@ test("history rejects invalid calendar dates and labels unknown currency without
   assert.match(elements.get("history-currency").textContent, /tidak dilaporkan/);
   assert.doesNotMatch(elements.get("history-price-range").textContent, /Rp/);
   assert.match(elements.get("history-point").attributes["aria-valuetext"], /Sementara/);
+});
+
+test("filter and sort rerender only the watchlist, without rebuilding market lists or fetching", async () => {
+  const { elements, calls, created } = setup();
+  await tick();
+  const keys = ["gainers-list", "losers-list", "most_active-list"];
+  const marketCounts = keys.map(key => elements.get(key).replacements);
+  const stockCount = elements.get("stocks").replacements;
+  const nodes = created();
+  elements.get("explorer-search").input({ target: { value: "BBCA" } });
+  assert.deepEqual(keys.map(key => elements.get(key).replacements), marketCounts);
+  assert.equal(elements.get("stocks").replacements, stockCount + 1);
+  assert.equal(created() - nodes, 7);
+  elements.get("explorer-sort").change({ target: { value: "volume" } });
+  assert.deepEqual(keys.map(key => elements.get(key).replacements), marketCounts);
+  assert.equal(calls.length, 2);
+});
+
+test("712-record history builds no table nodes until expanded and only rebuilds on data or locale change", async () => {
+  const points = Array.from({ length: 712 }, (_, i) => ({
+    date: new Date(Date.UTC(2023, 0, i + 1)).toISOString().slice(0, 10),
+    close: 100 + i, volume: 1000, adjusted_close: 100 + i,
+  }));
+  const { elements, calls, created } = setup({
+    fetchOverride: url => url.includes("/history?") && {
+      ok: true,
+      json: async () => ({ schema: "idx.daily-history.v1", data: { symbol: "BBCA", range: "3y", currency: "IDR", points } }),
+    },
+  });
+  await tick();
+  const before = created();
+  elements.get("history-panel").open = true;
+  elements.get("history-range").value = "3y";
+  await elements.get("history-panel").toggle();
+  assert.equal(created(), before);
+  const table = elements.get("history-rows");
+  assert.equal(table.children.length, 0);
+  const details = elements.get("history-records");
+  details.open = true;
+  details.toggle();
+  assert.equal(table.children.length, 712);
+  assert.equal(created() - before, 3560);
+  assert.equal(table.children[0].children[0].textContent, points.at(-1).date);
+  details.open = false;
+  details.toggle();
+  details.open = true;
+  details.toggle();
+  assert.equal(created() - before, 3560);
+  assert.equal(calls.length, 3);
+  elements.get("dashboard-language").change({ target: { value: "en" } });
+  assert.equal(table.children[0].children[3].textContent, "1,000");
+  assert.equal(calls.length, 3);
 });
