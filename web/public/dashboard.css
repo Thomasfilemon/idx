@@ -113,3 +113,11 @@
 .history-guide { stroke: #91a7b7; stroke-dasharray: 3 3; stroke-width: 1; }
 .history-table th { position: sticky; top: 0; background: #101923; }
 #dashboard-language { min-width: 48px; }
+.top-nav a[aria-current="page"] { color: #acf27c; text-decoration: underline; text-underline-offset: .35em; }
+@media (max-width: 620px) {
+  .site-header { display: grid; grid-template-columns: 1fr auto; height: auto; padding-block: 10px; }
+  .site-header .github-link { display: none; }
+  .site-header .language-select { grid-row: 1; grid-column: 2; }
+  .top-nav { display: flex; grid-column: 1 / -1; flex-wrap: wrap; gap: 0 1.25rem; }
+  .top-nav a { display: inline-flex; align-items: center; min-height: 44px; }
+}

@@ -2,6 +2,8 @@
 
 import argparse
 import subprocess
+import tempfile
+from urllib.parse import urlsplit
 import sys
 from pathlib import Path
 
@@ -35,7 +37,7 @@ MARKET = {
     },
 }
 ASSETS = {
-    "/": ("dashboard.html", "text/html; charset=utf-8"),
+
     "/dashboard.css": ("dashboard.css", "text/css; charset=utf-8"),
     "/dashboard.js": ("dashboard.js", "application/javascript; charset=utf-8"),
 }
@@ -80,6 +82,11 @@ def smoke(browser, name, width, screenshots):
             module_name = url.rsplit("/", 1)[-1]
             route.fulfill(body=(PUBLIC / "dashboard" / module_name).read_text(encoding="utf-8"),
                           content_type="application/javascript; charset=utf-8")
+        elif url.startswith(f"{SITE}/") and urlsplit(url).path in (
+            "/", "/dashboard.html", "/stock.html", "/market.html"
+        ):
+            path = urlsplit(url).path.lstrip("/") or "index.html"
+            route.fulfill(body=(PAGES / path).read_bytes(), content_type="text/html")
         elif url.startswith(f"{SITE}/") and url[len(SITE):] in ASSETS:
             path, content_type = ASSETS[url[len(SITE):]]
             body = (PUBLIC / path).read_text(encoding="utf-8")
@@ -173,6 +180,22 @@ def smoke(browser, name, width, screenshots):
     expect(page.get_by_role("combobox", name="Language")).to_have_value("en")
     page.get_by_role("combobox", name="Language").select_option("id")
     expect(page.get_by_text("Grafik historis", exact=True)).to_be_visible()
+    page.goto(SITE)
+    expect(page.locator('nav [aria-current="page"]')).to_have_text("Beranda")
+    assert page.locator("#refresh").count() == 0
+    counts = (market_requests, quote_requests)
+    page.get_by_role("link", name="Pasar", exact=True).click()
+    expect(page.locator("#quoted")).to_have_text("911")
+    assert (market_requests, quote_requests) == (counts[0] + 1, counts[1])
+    page.goto(SITE + "/stock.html?symbol=bbri.jk&range=3y")
+    expect(page.locator("#detail-title")).to_contain_text("BBRI")
+    expect(page.locator("#history-range")).to_have_value("3y")
+    assert (market_requests, quote_requests) == (counts[0] + 1, counts[1] + 1)
+    page.locator("#history-panel summary").first.click()
+    period.select_option("3w")
+    assert "symbol=BBRI&range=3w" in page.url
+    page.go_back()
+    expect(period).to_have_value("3y")
     assert not errors, errors
     page.close()
     print(f"{name}: layout, keyboard interaction and recovery passed", flush=True)
@@ -184,6 +207,9 @@ if __name__ == "__main__":
     parser.add_argument("--screenshots", type=Path, required=True)
     args = parser.parse_args()
     args.screenshots.mkdir(parents=True, exist_ok=True)
+    generated = tempfile.TemporaryDirectory()
+    PAGES = Path(generated.name)
+    subprocess.run([sys.executable, PUBLIC.parent / "scripts/dashboard-pages.py", PAGES], check=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=args.chrome)
         smoke(browser, "mobile-compact", 320, args.screenshots)

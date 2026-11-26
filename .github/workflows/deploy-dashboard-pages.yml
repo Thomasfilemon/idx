@@ -11,6 +11,7 @@ on:
       - 'web/public/dashboard/**'
       - 'data/universe.csv'
       - 'web/scripts/issuer-catalog.py'
+      - 'web/scripts/dashboard-pages.py'
       - '.github/workflows/deploy-dashboard-pages.yml'
 
 permissions:
@@ -38,8 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p _site
-          cp web/public/dashboard.html _site/index.html
-          cp web/public/dashboard.html _site/dashboard.html
+          python3 web/scripts/dashboard-pages.py _site
           cp web/public/dashboard.css _site/dashboard.css
           cp web/public/dashboard.js _site/dashboard.js
           # A release-specific module directory prevents mixed cached module graphs.
@@ -57,7 +57,7 @@ jobs:
           # Keep the HTML and its assets in sync across independent CDN caches.
           sed -i -e "s|\./dashboard.css|./dashboard.css?v=${GITHUB_SHA}|g" \
             -e "s|\./dashboard.js|./dashboard.js?v=${GITHUB_SHA}|g" \
-            -e "s|name=\"idx-build\" content=\"\"|name=\"idx-build\" content=\"${GITHUB_SHA}\"|" _site/index.html _site/dashboard.html
+            -e "s|name=\"idx-build\" content=\"\"|name=\"idx-build\" content=\"${GITHUB_SHA}\"|" _site/*.html
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload site artifact

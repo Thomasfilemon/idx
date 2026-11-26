@@ -1,8 +1,8 @@
 import { createPanelState, loadPanel } from "./api.mjs";
 
 const allowedSorts = new Set(["symbol", "price", "change_pct", "volume"]);
-const normalizeSymbol = (s) => String(s || "").trim().toUpperCase().replace(/\.JK$/, "");
-const validSymbol = (s) => /^[A-Z0-9][A-Z0-9-]{0,11}$/.test(s);
+export const normalizeSymbol = (s) => String(s || "").trim().toUpperCase().replace(/\.JK$/, "");
+export const validSymbol = (s) => /^[A-Z0-9][A-Z0-9-]{0,11}$/.test(s);
 
 const sortRows = (items, sort) => [...items].sort((a, b) => {
   if (sort === "symbol") return a.symbol.localeCompare(b.symbol);
@@ -12,12 +12,13 @@ const sortRows = (items, sort) => [...items].sort((a, b) => {
   return y - x || a.symbol.localeCompare(b.symbol);
 });
 
-export function createWatchlistPanel({ document, api, formatting, i18n, metaState, onSelect, onStatusChange }) {
+export function createWatchlistPanel({ document, api, formatting, i18n, metaState, onSelect, onStatusChange, initialSymbol = "BBCA" }) {
   const $ = id => document.getElementById(id);
   const { number, money, signed, cls, date, quoteChange } = formatting;
   const { tr, setLocalizedMessage } = i18n;
   const symbols = ["BBCA", "BBRI", "TLKM"];
-  let selected = "BBCA", rows = [];
+  if (!symbols.includes(initialSymbol)) symbols.push(initialSymbol);
+  let selected = initialSymbol, rows = [];
   let filter = "", sort = "symbol";
   const quotesPanel = createPanelState();
 
@@ -172,5 +173,14 @@ export function createWatchlistPanel({ document, api, formatting, i18n, metaStat
   });
   $("explorer-search").addEventListener("input", e => { filter = e.target.value.trim().toUpperCase(); renderList(); });
   $("explorer-sort").addEventListener("change", e => { sort = allowedSorts.has(e.target.value) ? e.target.value : "symbol"; renderList(); });
-  return { render, load: loadQuotes, selected: () => selected, isLoading: () => quotesPanel.loading };
+  function restore(symbol) {
+    if (symbol === selected) return;
+    selected = symbol;
+    if (!symbols.includes(symbol)) {
+      if (symbols.length === 20) symbols.pop();
+      symbols.push(symbol);
+      loadQuotes();
+    } else render();
+  }
+  return { render, restore, load: loadQuotes, selected: () => selected, isLoading: () => quotesPanel.loading };
 }
