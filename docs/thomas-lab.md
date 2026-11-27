@@ -172,3 +172,18 @@ outputs requires the same dates, seed and eligible inputs. Stock Explorer
 starts with SMA20 enabled. Optional price overlays and independent RSI/MACD
 panes share the price chart's time scale, zoom, pan and crosshair. The
 keyboard date slider and numeric readout provide the values without a mouse.
+
+### All-history weekly mode
+
+Stock Explorer supports `range=all&indicators=true`. This returns up to five
+calendar years of provider weekly bars (`interval: "1wk"`) and a
+`next_before` exclusive date cursor when older observations exist. Pass the
+cursor as `before` with the same symbol and range to retrieve the previous
+five years. The backend requests the provider's maximum weekly history and
+reuses its existing history cache. It computes indicators before slicing
+pages, using unadjusted weekly closes and the existing SMA, EMA, RSI and MACD
+math. The current week is treated as provisional until the next Monday;
+missing calendar weeks reset the indicator window. Minimum observation counts
+are measured in weeks. Historical weekly completeness is based on provider
+bars, since the verified exchange calendar only covers 2026–2027. The
+provider's coverage and listing history bound available pages.

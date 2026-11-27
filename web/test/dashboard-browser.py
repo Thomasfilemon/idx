@@ -78,6 +78,17 @@ def smoke(browser, name, width, screenshots):
                 route.fulfill(headers=cors, json={"schema": "idx.daily-history.v1", **OPTIONS,
                     "data": {"symbol": symbol, "range": range_code, "currency": "IDR", "points": []}})
                 return
+            if range_code == "all":
+                older = "before" in params
+                days = ["2016-11-21", "2021-11-15"] if older else ["2021-11-22", "2026-11-16"]
+                payload = {"symbol": symbol, "range": "all", "interval": "1wk", "currency": "IDR",
+                           "calculation": {"method": "idx.technical.weekly.v1"},
+                           "points": [{"date": day, "open": 3700, "high": 3800, "low": 3650,
+                                       "close": 3750, "volume": 1200} for day in days]}
+                if not older:
+                    payload["next_before"] = "2021-11-21"
+                route.fulfill(headers=cors, json={"schema": "idx.daily-history.v1", **OPTIONS, "data": payload})
+                return
             ohl = {"open": 3700, "high": 3800, "low": 3650} if range_code == "3mo" else {}
             calculation = {"calculation": {"method": "idx.technical.v1", "basis": "close"}} if "indicators" in params else {}
             study = {"indicators": {"observations": 215, "sma20": 3610, "rsi14": 60,
@@ -170,9 +181,9 @@ def smoke(browser, name, width, screenshots):
     period.select_option("3y")
     expect(page.get_by_text("Volume tertinggi · 1.200 saham")).to_be_visible()
     expect(page.locator("#history-rows tr")).to_have_count(0)
-    page.get_by_text("Lihat data harian", exact=True).click()
+    page.get_by_text("Lihat data historis", exact=True).click()
     expect(page.get_by_role("table", name="Data historis harian").get_by_role("row")).to_have_count(3)
-    observation = page.get_by_role("slider", name="Lihat data per hari")
+    observation = page.get_by_role("slider", name="Lihat observasi")
     expect(observation).to_have_attribute("aria-valuetext", "2026-11-20 · Penutupan Rp3.750 · Volume 1.200 · Sementara saat data diambil (*)")
     observation.press("Home")
     expect(observation).to_have_attribute("aria-valuetext", "2026-11-19 · Penutupan Rp3.700 · Volume —")
@@ -187,7 +198,7 @@ def smoke(browser, name, width, screenshots):
     expect(page.get_by_text("Highest volume · 1,200 shares")).to_be_visible()
     expect(page.get_by_role("table", name="Daily historical records")).to_be_visible()
     assert quote_requests == 3
-    expect(page.get_by_role("slider", name="Inspect a trading day")).to_have_attribute(
+    expect(page.get_by_role("slider", name="Inspect an observation")).to_have_attribute(
         "aria-valuetext", "2026-11-19 · Close Rp3,700 · Volume —"
     )
     page.locator(".dashboard-shell").screenshot(path=screenshots / f"dashboard-{name}.png")
@@ -246,6 +257,15 @@ def smoke(browser, name, width, screenshots):
     controls.get_by_label("MACD").uncheck()
     expect(page.locator("#financial-chart canvas")).to_have_count(baseline)
     expect(page.locator("#history-status")).to_contain_text("Data lama")
+    period.select_option("all")
+    expect(page.locator("#weekly-notice")).to_be_visible()
+    page.locator("#history-style").select_option("candlestick")
+    expect(page.locator("#history-style")).to_have_value("candlestick")
+    expect(page.locator("#history-older")).to_be_visible()
+    page.locator("#history-older").click()
+    expect(page.locator("#history-dates")).to_contain_text("2016-11-21")
+    expect(page.locator("#history-older")).to_be_hidden()
+    period.select_option("3mo")
     page.locator("#symbol").fill("BBCA")
     page.locator("#add").click()
     expect(page.locator("#history-status")).to_contain_text("Belum ada data historis BBCA")

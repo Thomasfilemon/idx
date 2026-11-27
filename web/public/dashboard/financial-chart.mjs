@@ -2,7 +2,7 @@ import { indicators, segments } from "./indicator-series.mjs";
 import { createChart, CandlestickSeries, LineSeries, HistogramSeries, ColorType } from "./vendor/lightweight-charts-5.0.9.mjs";
 
 // The native time scale keeps volume, gestures and crosshair aligned to the same session.
-export function createFinancialChart(host, points, mode, locale, onInspect) {
+export function createFinancialChart(host, points, mode, locale, onInspect, onOlder, visibleRange) {
   const chart = createChart(host, {
     autoSize: true,
     layout: { background: { type: ColorType.Solid, color: "#151f30" }, textColor: "#cfdae7" },
@@ -66,9 +66,21 @@ export function createFinancialChart(host, points, mode, locale, onInspect) {
       for (const pane of chart.panes().slice(1)) pane.setHeight(140);
     }
     chart.timeScale().fitContent();
+    if (visibleRange) chart.timeScale().setVisibleRange(visibleRange);
+    const gesture = new AbortController();
+    let interacted = false;
+    if (onOlder) {
+      for (const event of ["pointerdown", "wheel", "touchstart"]) {
+        host.addEventListener(event, () => { interacted = true; }, { passive: true, signal: gesture.signal });
+      }
+      chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (interacted && range && range.from < 8) onOlder();
+      });
+    }
     return {
       setIndicators,
-      remove: () => { chart.remove(); host.style.height = ""; },
+      visibleRange: () => chart.timeScale().getVisibleRange(),
+      remove: () => { gesture.abort(); chart.remove(); host.style.height = ""; },
       locale: locale => chart.applyOptions({ localization: { locale } }),
       inspect: p => chart.setCrosshairPosition(p.close, p.date, series),
     };

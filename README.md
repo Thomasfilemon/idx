@@ -10,7 +10,7 @@ An Indonesian stock market analytics platform for exploring IHSG market breadth,
 
 ### From market snapshot to individual stock
 
-Market Overview shows the benchmark, snapshot coverage, gainers, losers and activity. When missing market caps leave a movers list empty, it ranks traded stocks from the same snapshot and labels the fallback. Stock Explorer supports issuer search, a session watchlist, shareable ticker/range links and six history windows from three weeks to three years. Candlesticks require genuine OHLC values. A valid close supports a line chart when OHLC is incomplete.
+Market Overview shows the benchmark, snapshot coverage, gainers, losers and activity. When missing market caps leave a movers list empty, it ranks traded stocks from the same snapshot and labels the fallback. Stock Explorer supports issuer search, a session watchlist, shareable ticker/range links and six daily history windows from three weeks to three years, plus an all-history weekly view that loads five-year pages. Candlesticks require genuine OHLC values. A valid close supports a line chart when OHLC is incomplete.
 
 <p align="center">
   <img src="docs/screenshots/thomas-market.webp" alt="Actual market breadth and movers snapshot" width="700">
@@ -22,7 +22,7 @@ These captures show provider data returned on 27 November 2026. Open the demo fo
 
 GitHub Pages serves static HTML, shared CSS and native JavaScript modules. The browser calls an Axum REST service on Render. Existing Rust providers and caches supply market and price observations. The service validates symbols, normalizes WIB session dates, removes duplicate bars, checks OHLC relationships, and returns data with source and freshness metadata. Charts use a pinned, self-hosted TradingView Lightweight Charts module loaded when chart data is available.
 
-Indicators use the provider close on eligible, completed trading sessions. Five years of daily source history are requested for warm-up. Results are calculated before cropping to the visual range. SMA20/50/200 and EMA20 require 20/50/200 and 20 observations respectively. Wilder RSI14 requires 15 closes and returns 100 on a flat series. MACD(12,26,9) starts at 35 observations for CLI/MCP compatibility. Missing sessions reset the window. The verified calendar covers 2026–2027. Prices outside those years remain visible without indicator values.
+Indicators use the provider close on eligible, completed trading sessions. Five years of daily source history are requested for warm-up. Results are calculated before cropping to the visual range. SMA20/50/200 and EMA20 require 20/50/200 and 20 observations respectively. Wilder RSI14 requires 15 closes and returns 100 on a flat series. MACD(12,26,9) starts at 35 observations for CLI/MCP compatibility. Missing sessions reset the window. The verified calendar covers 2026–2027. Daily prices outside those years remain visible without indicator values. ALL uses provider-reported weekly closes and the same indicator math, with warm-up before pagination and a conservative provisional current week. Weekly historical completeness is provider-reported.
 
 ### Local setup and checks
 

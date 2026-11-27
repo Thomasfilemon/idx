@@ -155,6 +155,7 @@ const SCHEMA_DAILY_HISTORY: &str = "idx.daily-history.v1";
 struct HistoryQuery {
     #[serde(default)]
     indicators: bool,
+    before: Option<NaiveDate>,
     symbol: String,
     range: String,
 }
@@ -165,6 +166,10 @@ struct DailyHistory {
     range: String,
     currency: Option<String>,
     points: Vec<DailyPoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    interval: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_before: Option<NaiveDate>,
     #[serde(skip_serializing_if = "Option::is_none")]
     calculation: Option<Calculation>,
 }
@@ -214,7 +219,7 @@ async fn history(
         error(
             StatusCode::BAD_REQUEST,
             "invalid_history_query",
-            "Supply one IDX stock symbol and a range: 3w, 1mo, 3mo, ytd, 1y or 3y.",
+            "Supply one IDX stock symbol and a range: 3w, 1mo, 3mo, ytd, 1y, 3y or all.",
         )
     };
     let Query(query) = query.map_err(|_| invalid())?;
@@ -225,20 +230,42 @@ async fn history(
     let today = Utc::now()
         .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).expect("WIB"))
         .date_naive();
-    let (period, start) = history_window(&query.range, today).ok_or_else(invalid)?;
-    let period = if query.indicators { Period::Y5 } else { period };
+    let weekly = query.range == "all";
+    if query.before.is_some() && !weekly {
+        return Err(invalid());
+    }
+    let end = query.before.unwrap_or_else(|| today + chrono::Days::new(1));
+    if end > today + chrono::Days::new(1) || end.year() < 1900 {
+        return Err(invalid());
+    }
+    let (period, start) = if weekly {
+        (
+            Period::Max,
+            end.checked_sub_months(Months::new(60))
+                .ok_or_else(invalid)?,
+        )
+    } else {
+        history_window(&query.range, today).ok_or_else(invalid)?
+    };
+    let interval = if weekly {
+        Interval::Week1
+    } else {
+        Interval::Day1
+    };
+    let period = if query.indicators && !weekly {
+        Period::Y5
+    } else {
+        period
+    };
     let _slot = state
         .history_slots
         .try_acquire()
         .map_err(|_| unavailable())?;
-    let sourced = tokio::time::timeout(
-        TIMEOUT,
-        state.provider.history(&symbol, period, Interval::Day1),
-    )
-    .await
-    .map_err(|_| timed_out())?
-    .map_err(provider_error)?;
-    if sourced.data.interval != Interval::Day1 || sourced.data.symbol != symbol {
+    let sourced = tokio::time::timeout(TIMEOUT, state.provider.history(&symbol, period, interval))
+        .await
+        .map_err(|_| timed_out())?
+        .map_err(provider_error)?;
+    if sourced.data.interval != interval || sourced.data.symbol != symbol {
         return Err(unavailable());
     }
 
@@ -250,8 +277,17 @@ async fn history(
     let window_start = as_of
         .checked_sub_months(Months::new(60))
         .ok_or_else(unavailable)?;
+    let window_start = if weekly {
+        NaiveDate::from_ymd_opt(1900, 1, 1).expect("valid date")
+    } else {
+        window_start
+    };
     let calculation = query.indicators.then(|| Calculation {
-        method: "idx.technical.v1",
+        method: if weekly {
+            "idx.technical.weekly.v1"
+        } else {
+            "idx.technical.v1"
+        },
         basis: "close",
         window_start,
         as_of,
@@ -261,17 +297,39 @@ async fn history(
         let mut points = daily_points(
             history.candles,
             history.close_only,
-            calculation.as_ref().map_or(start, |c| c.window_start),
+            if weekly {
+                window_start
+            } else {
+                calculation.as_ref().map_or(start, |c| c.window_start)
+            },
             today,
             fetched_at,
         );
-        if calculation.is_some() {
-            indicator_window(&mut points, start);
-        }
+        let next_before = if weekly {
+            for point in &mut points {
+                point.date = point.date
+                    - chrono::Days::new(u64::from(point.date.weekday().num_days_from_monday()));
+                point.provisional = point.date + chrono::Days::new(7) > as_of;
+            }
+            points.dedup_by_key(|point| point.date);
+            if calculation.is_some() {
+                attach_weekly_indicators(&mut points);
+            }
+            let more = points.iter().any(|p| p.date < start);
+            points.retain(|point| point.date >= start && point.date < end);
+            more.then_some(start)
+        } else {
+            if calculation.is_some() {
+                indicator_window(&mut points, start);
+            }
+            None
+        };
         DailyHistory {
             symbol,
             range: query.range,
             calculation,
+            interval: weekly.then_some("1wk"),
+            next_before,
             points,
             currency: history.currency.and_then(|currency| {
                 let code = currency.trim().to_ascii_uppercase();
@@ -370,6 +428,38 @@ fn attach_indicators(points: &mut [DailyPoint]) {
         let (continuation, tail) = rest.split_at_mut(count);
         let closes: Vec<_> = std::iter::once(first.close)
             .chain(continuation.iter().map(|p| p.close))
+            .collect();
+        for (point, values) in std::iter::once(first)
+            .chain(continuation)
+            .zip(daily_indicators(&closes))
+        {
+            point.indicators = Some(values);
+        }
+        remaining = tail;
+    }
+}
+
+// Weekly provider observations are used as reported; missing weeks reset the seed.
+fn attach_weekly_indicators(points: &mut [DailyPoint]) {
+    let mut remaining = points;
+    while let Some((first, rest)) = remaining.split_first_mut() {
+        if first.provisional {
+            remaining = rest;
+            continue;
+        }
+        let mut previous = first.date;
+        let count = rest
+            .iter()
+            .take_while(|point| {
+                let consecutive =
+                    !point.provisional && point.date == previous + chrono::Days::new(7);
+                previous = point.date;
+                consecutive
+            })
+            .count();
+        let (continuation, tail) = rest.split_at_mut(count);
+        let closes: Vec<_> = std::iter::once(first.close)
+            .chain(continuation.iter().map(|point| point.close))
             .collect();
         for (point, values) in std::iter::once(first)
             .chain(continuation)
@@ -730,8 +820,12 @@ mod tests {
             period: Period,
             interval: Interval,
         ) -> idx::Result<Sourced<History>> {
-            assert_eq!(period, if self.1 { Period::Y5 } else { Period::M1 });
-            assert_eq!(interval, Interval::Day1);
+            if interval == Interval::Week1 {
+                assert_eq!(period, Period::Max);
+            } else {
+                assert_eq!(period, if self.1 { Period::Y5 } else { Period::M1 });
+                assert_eq!(interval, Interval::Day1);
+            }
             let wib = idx::model::wib();
             let time = Utc::now()
                 .with_timezone(&wib)
@@ -759,7 +853,18 @@ mod tests {
                     currency: Some("IDR".into()),
                     period,
                     interval,
-                    candles: vec![old, candle.clone(), candle],
+                    candles: if interval == Interval::Week1 {
+                        (0..600)
+                            .rev()
+                            .map(|week| {
+                                let mut row = candle.clone();
+                                row.time = time - chrono::Days::new(week * 7);
+                                row
+                            })
+                            .collect()
+                    } else {
+                        vec![old, candle.clone(), candle]
+                    },
                     summary: None,
                 },
                 self.name(),
@@ -834,6 +939,33 @@ mod tests {
         assert_eq!(short["data"]["calculation"], long["data"]["calculation"]);
         assert_eq!(short["data"]["calculation"]["basis"], "close");
         assert_eq!(short["data"]["points"][0], long["data"]["points"][1]);
+    }
+
+    #[tokio::test]
+    async fn weekly_pages_are_disjoint_and_keep_warmed_up_indicators() {
+        let app = router(Arc::new(Fixture(0.into(), true)), one_issuer(), vec![]);
+        let (status, first) = request(
+            app.clone(),
+            "/api/history?symbol=BBCA&range=all&indicators=true",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let data = &first["data"];
+        assert_eq!(data["interval"], "1wk");
+        let rows = data["points"].as_array().unwrap();
+        assert!((259..=262).contains(&rows.len()));
+        assert!(rows[0]["indicators"]["sma200"].is_number());
+        assert_eq!(rows.last().unwrap()["provisional"], true);
+        assert!(rows.last().unwrap()["indicators"].is_null());
+        let before = data["next_before"].as_str().unwrap();
+        let path = format!("/api/history?symbol=BBCA&range=all&indicators=true&before={before}");
+        let (status, older) = request(app, &path).await;
+        assert_eq!(status, StatusCode::OK);
+        let earlier = older["data"]["points"].as_array().unwrap();
+        assert!(
+            earlier.last().unwrap()["date"].as_str().unwrap() < rows[0]["date"].as_str().unwrap()
+        );
+        assert_eq!(earlier.last().unwrap()["indicators"]["sma20"], 123.0);
     }
 
     #[test]

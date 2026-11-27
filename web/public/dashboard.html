@@ -159,6 +159,7 @@
                   <select id="history-style"><option value="candlestick">Candlestick</option><option value="line" data-en="Line">Garis</option></select>
                   <p id="history-chart-status" class="notice" role="status"></p>
                   <div id="financial-chart" hidden></div>
+                  <button id="history-older" type="button" class="action-button" data-en="Load previous 5 years" hidden>Muat 5 tahun sebelumnya</button>
 <!-- pages stock -->
                   <fieldset id="indicator-controls"><legend data-en="Technical indicators">Indikator teknikal</legend>
                     <label><input type="checkbox" value="sma20" checked> SMA20</label>
@@ -168,7 +169,8 @@
                     <label><input type="checkbox" value="rsi14"> RSI14</label>
                     <label><input type="checkbox" value="macd"> MACD</label>
                   </fieldset>
-                  <p class="notice" data-en="Indicators cover verified exchange sessions in 2026–2027. Earlier prices remain available.">Indikator mencakup sesi bursa terverifikasi 2026–2027. Harga sebelumnya tetap tersedia.</p>
+                  <p id="daily-notice" class="notice" data-en="Indicators cover verified exchange sessions in 2026–2027. Earlier prices remain available.">Indikator mencakup sesi bursa terverifikasi 2026–2027. Harga sebelumnya tetap tersedia.</p>
+                  <p id="weekly-notice" class="notice" hidden data-en="Weekly indicators use reported weekly closes. Missing weeks reset calculation; the current week is provisional. Older weekly data is provider-reported and not verified against the exchange calendar.">Indikator mingguan menggunakan penutupan mingguan provider. Minggu yang hilang mengulang perhitungan; minggu berjalan bersifat sementara. Data mingguan lama belum diverifikasi dengan kalender bursa.</p>
                   <p id="indicator-readout" class="notice"></p>
 <!-- end pages -->
                   <p id="history-dates" class="notice"></p>
@@ -183,11 +185,11 @@
                     <svg viewBox="0 0 400 65" preserveAspectRatio="none" aria-hidden="true"><path id="history-volume-path"></path><path id="history-volume-guide" class="history-guide"></path></svg>
                     <p id="history-volume-range" class="notice"></p>
                   </figure>
-                  <label for="history-point" data-en="Inspect a trading day">Lihat data per hari</label>
+                  <label for="history-point" data-en="Inspect an observation">Lihat observasi</label>
                   <input id="history-point" class="history-point" type="range" min="0" max="0" value="0" aria-describedby="history-observation">
                   <p id="history-observation" class="notice"></p>
-                  <details id="history-records"><summary data-en="View daily records">Lihat data harian</summary>
-                    <div class="history-table"><table aria-label="Data historis harian" data-en-aria-label="Daily historical records"><thead><tr><th scope="col" data-en="Date (WIB)">Tanggal (WIB)</th><th scope="col" data-en="Close">Penutupan</th><th scope="col" data-en="Adjusted close">Penutupan disesuaikan</th><th scope="col">Volume</th></tr></thead><tbody id="history-rows"></tbody></table></div>
+                  <details id="history-records"><summary data-en="View historical records">Lihat data historis</summary>
+                    <div class="history-table"><table aria-label="Data historis" data-en-aria-label="Historical records"><thead><tr><th scope="col" data-en="Date (WIB)">Tanggal (WIB)</th><th scope="col" data-en="Close">Penutupan</th><th scope="col" data-en="Adjusted close">Penutupan disesuaikan</th><th scope="col">Volume</th></tr></thead><tbody id="history-rows"></tbody></table></div>
                   </details>
                 </div>
               </details>

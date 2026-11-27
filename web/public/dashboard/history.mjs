@@ -19,6 +19,9 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
   let tableDirty = true;
   let chart;
   let chartVersion = 0;
+  let historySource;
+  let olderLoading = false;
+  let olderFailed = false;
   let preferredMode = "candlestick";
   const host = $("financial-chart");
   function clearChart() {
@@ -28,7 +31,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     host.hidden = true;
     $("history-data").classList.remove("interactive");
   }
-  async function drawChart() {
+  async function drawChart(visibleRange) {
     clearChart();
     const version = chartVersion;
     const { points } = historyData;
@@ -48,7 +51,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       chart = createFinancialChart(host, points, mode, document.documentElement.lang, index => {
         $("history-point").value = String(index);
         showHistoryObservation();
-      });
+      }, historyData.range === "all" ? () => loadOlder() : undefined, visibleRange);
       if (controls && historyData.calculation) chart.setIndicators(selectedIndicators());
       $("history-data").classList.add("interactive");
     } catch {
@@ -64,10 +67,13 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
   });
   const historyPrice = (value, currency) => currency === "IDR" ? money(value)
     : number(value) + (currency && Number.isFinite(value) ? " " + currency : "");
-  function renderLabels({ points, currency }) {
+  function renderLabels({ points, currency, range }) {
     const { low, high, maxVolume } = geometry;
-    $("history-dates").textContent = points[0].date + " – " + points.at(-1).date + " · " + number(points.length) + tr(" hari dengan data", " days with data")
-      + (points.some(point => point.provisional) ? tr(" · * Sesi belum selesai saat data diambil", " · * Session incomplete when fetched") : "");
+    const weekly = range === "all";
+    if ($("weekly-notice")) $("weekly-notice").hidden = !weekly;
+    if ($("daily-notice")) $("daily-notice").hidden = weekly;
+    $("history-dates").textContent = points[0].date + " – " + points.at(-1).date + " · " + number(points.length) + (range === "all" ? tr(" minggu dengan data", " weeks with data") : tr(" hari dengan data", " days with data"))
+      + (points.some(point => point.provisional) ? tr(" · * Periode belum selesai saat data diambil", " · * Period incomplete when fetched") : "");
     $("history-price-range").textContent = tr("Rentang penutupan · ", "Closing price range · ") + historyPrice(low, currency) + " – " + historyPrice(high, currency);
     $("history-volume-range").textContent = maxVolume ? tr("Volume tertinggi · ", "Highest volume · ") + number(maxVolume) + tr(" saham", " shares") : tr("Volume tidak tersedia.", "Volume unavailable.");
     $("history-currency").textContent = currency
@@ -124,10 +130,10 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       let reason = "";
       if (!historyData.calculation) reason = tr("Indikator tidak tersedia.", "Indicators unavailable.");
       else if (values.length && !row) reason = point.provisional
-        ? tr("Sesi sementara.", "Provisional session.")
+        ? tr("Periode sementara.", "Provisional period.")
         : tr("Sesi di luar kalender terverifikasi.", "Session outside verified calendar.");
       else if (values.length && selectedIndicators().some(key => row?.[key] == null))
-        reason = number(row.observations) + tr(" sesi berurutan tersedia.", " consecutive sessions available.");
+        reason = number(row.observations) + (historyData.range === "all" ? tr(" minggu berurutan tersedia.", " consecutive weeks available.") : tr(" sesi berurutan tersedia.", " consecutive sessions available."));
       $("indicator-readout").textContent = [point.date, ...values, reason].filter(Boolean).join(" · ");
     }
     slider.setAttribute("aria-valuetext", label);
@@ -152,6 +158,9 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     const key = symbol + ":" + range;
     if (!force && key === historyKey) return;
     historyKey = key;
+    olderLoading = false;
+    olderFailed = false;
+    if ($("history-older")) $("history-older").hidden = true;
     historyRequest?.abort();
     const request = new AbortController();
     historyRequest = request;
@@ -171,7 +180,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
         try {
           response = await api.get(path + "&indicators=true", request.signal);
         } catch (error) {
-          if (request.signal.aborted || ![400, 404, 502, 503].includes(error.status)) throw error;
+          if (range === "all" || request.signal.aborted || ![400, 404, 502, 503].includes(error.status)) throw error;
           // Older API releases and providers without five-year history can still serve prices.
           response = await api.get(path, request.signal);
         }
@@ -183,7 +192,10 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
         setLocalizedMessage(status, () => tr("Belum ada data historis ", "No historical data for ") + symbol + tr(" untuk rentang ini.", " in this range."));
         return;
       }
+      if (range === "all" && data.interval !== "1wk") throw Error("Expected weekly history");
       historyData = data;
+      historySource = { provider, fetched_at };
+      if ($("history-older")) $("history-older").hidden = !data.next_before;
       geometry = historyGeometry(data.points);
       $("history-price-path").setAttribute("d", geometry.pricePath);
       $("history-volume-path").setAttribute("d", geometry.volumePath);
@@ -204,6 +216,47 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       if (historyRequest === request && $("history-loading")) $("history-loading").hidden = true;
     }
   }
+  async function loadOlder(manual = false) {
+    if (!historyData?.next_before || olderLoading || (olderFailed && !manual)) return;
+    const request = historyRequest;
+    const current = historyData;
+    olderLoading = true;
+    olderFailed = false;
+    const button = $("history-older");
+    button.disabled = true;
+    setLocalizedMessage(button, () => tr("Memuat minggu sebelumnya…", "Loading earlier weeks…"));
+    try {
+      const params = new URLSearchParams({ symbol: current.symbol, range: "all", before: current.next_before, indicators: "true" });
+      const { data, provider, fetched_at } = ensureEnvelope(await api.get("/api/history?" + params, request.signal), "idx.daily-history.v1",
+        data => validHistory(data, current.symbol, "all") && data.interval === "1wk");
+      if (request !== historyRequest) return;
+      if (provider !== historySource.provider || fetched_at !== historySource.fetched_at) {
+        throw Error("History snapshot changed; refresh to retrieve a consistent series");
+      }
+      if (data.currency !== current.currency || (data.next_before && data.next_before >= current.next_before) ||
+          data.points.some(p => p.date >= current.points[0].date)) throw Error("Inconsistent weekly page");
+      const visible = chart?.visibleRange();
+      const points = [...data.points, ...current.points];
+      historyData = { ...current, points, next_before: data.next_before };
+      geometry = historyGeometry(points);
+      $("history-price-path").setAttribute("d", geometry.pricePath);
+      $("history-volume-path").setAttribute("d", geometry.volumePath);
+      $("history-point").value = String(Number($("history-point").value) + data.points.length);
+      renderLabels(historyData);
+      if (data.points.length) drawChart(visible);
+      button.hidden = !data.next_before;
+    } catch {
+      if (request !== historyRequest) return;
+      olderFailed = true;
+    } finally {
+      if (request === historyRequest) {
+        olderLoading = false;
+        button.disabled = false;
+        setLocalizedMessage(button, () => olderFailed ? tr("Coba lagi histori lama (perbarui jika gagal)", "Retry earlier history (refresh if it fails)") : tr("Muat 5 tahun sebelumnya", "Load previous 5 years"));
+      }
+    }
+  }
+  $("history-older")?.addEventListener("click", () => loadOlder(true));
   $("history-panel").addEventListener("toggle", () => updateHistory());
   $("history-range").addEventListener("change", () => updateHistory());
   $("history-retry").addEventListener("click", () => {

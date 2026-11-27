@@ -30,7 +30,7 @@ export function initDashboard({ document, fetch, storage }) {
     const symbol = normalizeSymbol(params.get("symbol"));
     const range = params.get("range");
     return { symbol: validSymbol(symbol) ? symbol : "BBCA",
-      range: ["3w", "1mo", "3mo", "ytd", "1y", "3y"].includes(range) ? range : "1mo" };
+      range: ["3w", "1mo", "3mo", "ytd", "1y", "3y", "all"].includes(range) ? range : "1mo" };
   };
   const route = stockPage ? readRoute() : {};
   const market = page === "stock" ? null : createMarketPanel({ ...context, onStatusChange: renderRefresh });
