@@ -47,11 +47,15 @@ export function createWatchlistPanel({ document, api, formatting, i18n, metaStat
       return b;
     });
     $("stocks").replaceChildren(...list);
+    $("stocks").setAttribute("data-loading", String(quotesPanel.loading && !list.length));
     if (focusedTicker) list.find(button => button.dataset.ticker === focusedTicker)?.focus({ preventScroll: true });
     $("empty").textContent = !visible.length && !quotesPanel.loading && !quotesPanel.error ? (filter && rows.length ? tr("Tidak ada saham yang cocok dengan pencarian.", "No stocks match your search.") : tr("Data saham belum tersedia.", "Stock data is unavailable.")) : "";
   }
   function renderDetail() {
     const q = rows.find(x => x.symbol === selected);
+    for (const id of ["detail-price", "detail-change", "detail-volume", "detail-time"]) {
+      $(id).setAttribute("data-loading", String(quotesPanel.loading && !q));
+    }
     $("detail-title").textContent = selected + tr(" · Detail saham", " · Stock details");
     $("detail-name").textContent = q?.name || tr("Data belum tersedia", "Data unavailable");
     $("detail-source").textContent = quotesPanel.meta?.provider || "—";
@@ -100,6 +104,7 @@ export function createWatchlistPanel({ document, api, formatting, i18n, metaStat
   $("issuer-query").addEventListener("input", () => {
     issuerSearchId++;
     $("issuer-results").replaceChildren();
+    $("issuer-results").setAttribute("data-loading", "false");
     setLocalizedMessage($("issuer-status"), () => "");
   });
   $("issuer-search").addEventListener("submit", async event => {
@@ -110,11 +115,13 @@ export function createWatchlistPanel({ document, api, formatting, i18n, metaStat
     const status = $("issuer-status");
     const results = $("issuer-results");
     results.replaceChildren();
+    results.setAttribute("data-loading", "false");
     if (query.length < 2) {
       setLocalizedMessage(status, () => tr("Masukkan minimal 2 karakter.", "Enter at least 2 characters."));
       return;
     }
     setLocalizedMessage(status, () => tr("Memuat katalog emiten…", "Loading issuer catalog…"));
+    results.setAttribute("data-loading", "true");
     try {
       const catalog = await loadIssuerCatalog();
       if (id !== issuerSearchId) return;
@@ -139,6 +146,8 @@ export function createWatchlistPanel({ document, api, formatting, i18n, metaStat
         : tr("Emiten tidak ditemukan di katalog.", "No issuers found in the catalog."));
     } catch {
       if (id === issuerSearchId) setLocalizedMessage(status, () => tr("Katalog tidak tersedia. Coba cari lagi atau masukkan ticker secara manual.", "Catalog unavailable. Try again or enter a ticker manually."));
+    } finally {
+      if (id === issuerSearchId) results.setAttribute("data-loading", "false");
     }
   });
 

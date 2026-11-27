@@ -144,3 +144,28 @@
   [data-page="stock"] #financial-chart { order: -1; margin-bottom: 12px; }
   [data-page="stock"] #history-style { align-self: flex-start; }
 }
+
+/* Stock Explorer keeps issuer discovery above the chart and watchlist. */
+[data-page="stock"] .stock-search { padding: 12px clamp(12px, 3vw, 32px); border-bottom: 1px solid #344454; }
+[data-page="stock"] .dashboard-body { grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr); align-items: start; }
+[data-page="stock"] .dashboard-list { grid-column: 2; grid-row: 1 / span 2; min-width: 0; }
+[data-page="stock"] .detail { grid-column: 1; min-width: 0; }
+@media (max-width: 900px) {
+  [data-page="stock"] .dashboard-body { grid-template-columns: minmax(0, 1fr); }
+  [data-page="stock"] .dashboard-list, [data-page="stock"] .detail { grid-column: auto; grid-row: auto; }
+}
+[data-loading="true"], .history-skeleton {
+  color: transparent !important;
+  border-radius: 8px;
+  background: linear-gradient(100deg, #192636 25%, #293b50 48%, #192636 72%);
+  background-size: 220% 100%;
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+[data-loading="true"] { min-height: 1.2em; }
+.movers-list[data-loading="true"], #stocks[data-loading="true"], #issuer-results[data-loading="true"] { min-height: 112px; }
+.movers-list[data-loading="true"] > * { visibility: hidden; }
+.history-skeleton:not([hidden]) { height: clamp(260px, 42vh, 440px); margin-block: 12px; }
+@keyframes skeleton-pulse { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  [data-loading="true"], .history-skeleton { animation: none; }
+}

@@ -210,10 +210,12 @@ def smoke(browser, name, width, screenshots):
     expect(page.locator("#chart-symbol")).to_have_text("BBRI")
     expect(page.locator("#financial-chart canvas").first).to_be_visible()
     expect(page.locator("#history-rows tr")).to_have_count(0)
-    assert page.locator("#history-panel").bounding_box()["y"] < page.locator(".dashboard-body").bounding_box()["y"]
+    assert page.locator("#issuer-search").bounding_box()["y"] < page.locator("#history-panel").bounding_box()["y"]
     if mobile:
-        chart_top = page.locator("#financial-chart").bounding_box()["y"]
-        assert chart_top < page.viewport_size["height"] - 100, chart_top
+        assert page.locator(".dashboard-list").bounding_box()["y"] >= page.locator("#history-panel").bounding_box()["y"]
+    else:
+        assert page.locator(".dashboard-list").bounding_box()["x"] > page.locator("#history-panel").bounding_box()["x"]
+    expect(page.locator("#history-loading")).to_be_hidden()
     period.select_option("3w")
     assert "symbol=BBRI&range=3w" in page.url
     page.go_back()

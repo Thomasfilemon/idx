@@ -142,6 +142,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     if (document.body?.dataset?.page !== "stock" && !$("history-panel").open) {
       historyRequest?.abort();
       historyRequest = undefined;
+      if ($("history-loading")) $("history-loading").hidden = true;
       historyKey = "";
       return;
     }
@@ -160,6 +161,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     tableDirty = true;
     $("history-rows").replaceChildren();
     $("history-data").hidden = true;
+    if ($("history-loading")) $("history-loading").hidden = false;
     $("history-retry").hidden = true;
     setLocalizedMessage(status, () => tr("Memuat histori ", "Loading history for ") + symbol + "…");
     try {
@@ -198,6 +200,8 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       if (historyRequest !== request) return;
       setLocalizedMessage(status, () => tr("Histori ", "History for ") + symbol + tr(" belum dapat dimuat.", " could not be loaded."));
       $("history-retry").hidden = false;
+    } finally {
+      if (historyRequest === request && $("history-loading")) $("history-loading").hidden = true;
     }
   }
   $("history-panel").addEventListener("toggle", () => updateHistory());

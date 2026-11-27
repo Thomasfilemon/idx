@@ -44,7 +44,14 @@ def pages(destination):
             chart = chart.replace('aria-describedby="history-observation"',
                                   'aria-describedby="history-observation indicator-readout"')
             panel = '<section id="history-panel" class="history-panel" aria-labelledby="chart-heading">' + chart + '</section>'
-            html = (before + after).replace('<div class="dashboard-body">', panel + '\n<div class="dashboard-body">')
+            html = before + after
+            search_start = html.index('<form id="issuer-search"')
+            search_end = html.index('</form>', search_start) + len('</form>')
+            search = html[search_start:search_end]
+            html = html[:search_start] + html[search_end:]
+            html = html.replace('<div class="dashboard-body">',
+                                '<div class="stock-search">' + search + '</div>\n'
+                                '<div class="dashboard-body">' + panel)
 
             html = html.replace('<span id="mode" class="mode" data-en="Loading market data…">Memuat data pasar…</span>', '')
         (destination / file).write_text(html, encoding="utf-8")

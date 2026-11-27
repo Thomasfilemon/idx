@@ -58,6 +58,9 @@ export function createMarketPanel({ document, api, formatting, tr, metaState, on
     }
   }
   function render() {
+    for (const id of ["ihsg", "ihsg-change", "advancing", "declining", "unchanged", "quoted", "gainers-list", "losers-list", "most_active-list"]) {
+      $(id).setAttribute("data-loading", String(marketPanel.loading && !marketPanel.meta));
+    }
     renderInsights();
     const ix = market?.index;
     $("ihsg").textContent = number(ix?.price);
