@@ -182,7 +182,7 @@ def smoke(browser, name, width, screenshots):
     expect(page.get_by_text("Volume tertinggi · 1.200 saham")).to_be_visible()
     expect(page.locator("#history-rows tr")).to_have_count(0)
     page.get_by_text("Lihat data historis", exact=True).click()
-    expect(page.get_by_role("table", name="Data historis harian").get_by_role("row")).to_have_count(3)
+    expect(page.get_by_role("table", name="Data historis").get_by_role("row")).to_have_count(3)
     observation = page.get_by_role("slider", name="Lihat observasi")
     expect(observation).to_have_attribute("aria-valuetext", "2026-11-20 · Penutupan Rp3.750 · Volume 1.200 · Sementara saat data diambil (*)")
     observation.press("Home")
