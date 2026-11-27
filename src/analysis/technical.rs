@@ -41,8 +41,12 @@ pub fn ema(values: &[f64], n: usize) -> Option<f64> {
 
 /// Wilder's RSI over `n` periods.
 pub fn rsi(closes: &[f64], n: usize) -> Option<f64> {
-    if n == 0 || closes.len() < n + 1 {
-        return None;
+    rsi_series(closes, n).last().copied()
+}
+
+fn rsi_series(closes: &[f64], n: usize) -> Vec<f64> {
+    if n == 0 || closes.len() <= n {
+        return Vec::new();
     }
     let mut gain = 0.0;
     let mut loss = 0.0;
@@ -56,23 +60,32 @@ pub fn rsi(closes: &[f64], n: usize) -> Option<f64> {
     }
     let mut avg_gain = gain / n as f64;
     let mut avg_loss = loss / n as f64;
+    let value = |gain: f64, loss: f64| {
+        if loss == 0.0 {
+            100.0
+        } else {
+            100.0 - 100.0 / (1.0 + gain / loss)
+        }
+    };
+    let mut values = vec![value(avg_gain, avg_loss)];
     for w in closes[n..].windows(2) {
         let d = w[1] - w[0];
         let (g, l) = if d > 0.0 { (d, 0.0) } else { (0.0, -d) };
         avg_gain = (avg_gain * (n as f64 - 1.0) + g) / n as f64;
         avg_loss = (avg_loss * (n as f64 - 1.0) + l) / n as f64;
+        values.push(value(avg_gain, avg_loss));
     }
-    if avg_loss == 0.0 {
-        return Some(100.0);
-    }
-    let rs = avg_gain / avg_loss;
-    Some(100.0 - 100.0 / (1.0 + rs))
+    values
 }
 
 /// MACD(fast, slow, signal). Returns the latest line, signal and histogram.
 pub fn macd(closes: &[f64], fast: usize, slow: usize, signal: usize) -> Option<Macd> {
-    if closes.len() < slow + signal {
-        return None;
+    macd_series(closes, fast, slow, signal).pop()
+}
+
+fn macd_series(closes: &[f64], fast: usize, slow: usize, signal: usize) -> Vec<Macd> {
+    if fast == 0 || fast > slow || signal == 0 || closes.len() < slow.saturating_add(signal) {
+        return Vec::new();
     }
     let ef = ema_series(closes, fast);
     let es = ema_series(closes, slow);
@@ -84,13 +97,48 @@ pub fn macd(closes: &[f64], fast: usize, slow: usize, signal: usize) -> Option<M
         .map(|(i, s)| ef[i + offset] - s)
         .collect();
     let sig = ema_series(&line, signal);
-    let l = *line.last()?;
-    let s = *sig.last()?;
-    Some(Macd {
-        line: l,
-        signal: s,
-        histogram: l - s,
-    })
+    // Preserve the CLI threshold: the first published sample has slow + signal observations.
+    line.into_iter()
+        .skip(signal)
+        .zip(sig.into_iter().skip(1))
+        .map(|(line, signal)| Macd {
+            line,
+            signal,
+            histogram: line - signal,
+        })
+        .collect()
+}
+
+/// Daily values for a continuous segment of eligible provider closes.
+#[derive(Debug, Default, serde::Serialize)]
+pub struct DailyIndicators {
+    pub observations: usize,
+    pub sma20: Option<f64>,
+    pub sma50: Option<f64>,
+    pub sma200: Option<f64>,
+    pub ema20: Option<f64>,
+    pub rsi14: Option<f64>,
+    pub macd: Option<Macd>,
+}
+
+pub fn daily_indicators(closes: &[f64]) -> Vec<DailyIndicators> {
+    let ema = ema_series(closes, 20);
+    let rsi = rsi_series(closes, 14);
+    let macd = macd_series(closes, 12, 26, 9);
+    (1..=closes.len())
+        .map(|n| {
+            let prefix = &closes[..n];
+            DailyIndicators {
+                observations: n,
+                sma20: sma(prefix, 20),
+                sma50: sma(prefix, 50),
+                sma200: sma(prefix, 200),
+                ema20: n.checked_sub(20).and_then(|i| ema.get(i)).copied(),
+                rsi14: n.checked_sub(15).and_then(|i| rsi.get(i)).copied(),
+                macd: n.checked_sub(35).and_then(|i| macd.get(i)).cloned(),
+            }
+        })
+        .collect()
 }
 
 /// Bollinger bands with population standard deviation.
@@ -535,6 +583,31 @@ mod tests {
         let lv = levels(&c, 120, 5, 100.0);
         assert_eq!(lv.support, vec![89.0]);
         assert_eq!(lv.resistance, vec![121.0]);
+    }
+
+    #[test]
+    fn series_match_prefix_reports_and_respect_minima() {
+        let closes: Vec<_> = (0..235).map(|i| 100.0 + f64::from((i * 7) % 13)).collect();
+        let values = daily_indicators(&closes);
+        for (index, day) in values.iter().enumerate() {
+            let prefix = &closes[..=index];
+            assert_eq!(day.observations, prefix.len());
+            for (window, average) in [(20, day.sma20), (50, day.sma50), (200, day.sma200)] {
+                assert_eq!(average, sma(prefix, window));
+            }
+            assert_eq!(day.ema20, ema(prefix, 20));
+            assert_eq!(day.rsi14, rsi(prefix, 14));
+            assert_eq!(day.macd, macd(prefix, 12, 26, 9));
+            assert_eq!(day.macd.is_some(), prefix.len() >= 35);
+        }
+        let linear: Vec<_> = (1..=200).map(f64::from).collect();
+        let rows = daily_indicators(&linear);
+        assert_eq!(rows[199].sma200, Some(100.5));
+        assert_eq!(rows[19].ema20, Some(10.5));
+        assert_eq!(rows[14].rsi14, Some(100.0));
+        let m = rows[34].macd.as_ref().unwrap();
+        assert!((m.line - 7.0).abs() < 1e-10 && m.histogram.abs() < 1e-10);
+        assert_eq!(daily_indicators(&[42.0; 15])[14].rsi14, Some(100.0));
     }
 
     #[test]

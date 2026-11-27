@@ -15,6 +15,7 @@ use axum::{
 };
 use chrono::{DateTime, Datelike, Months, NaiveDate, Timelike, Utc, Weekday};
 use idx::{
+    analysis::technical::{daily_indicators, DailyIndicators},
     cli::{build_context, GlobalOpts},
     error::IdxError,
     holidays,
@@ -152,6 +153,8 @@ const SCHEMA_DAILY_HISTORY: &str = "idx.daily-history.v1";
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HistoryQuery {
+    #[serde(default)]
+    indicators: bool,
     symbol: String,
     range: String,
 }
@@ -162,10 +165,23 @@ struct DailyHistory {
     range: String,
     currency: Option<String>,
     points: Vec<DailyPoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    calculation: Option<Calculation>,
+}
+
+#[derive(serde::Serialize)]
+struct Calculation {
+    method: &'static str,
+    basis: &'static str,
+    window_start: NaiveDate,
+    as_of: NaiveDate,
+    calendar_years: Vec<i32>,
 }
 
 #[derive(serde::Serialize)]
 struct DailyPoint {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    indicators: Option<DailyIndicators>,
     date: NaiveDate,
     bar_time: DateTime<chrono::FixedOffset>,
     open: Option<f64>,
@@ -210,6 +226,7 @@ async fn history(
         .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).expect("WIB"))
         .date_naive();
     let (period, start) = history_window(&query.range, today).ok_or_else(invalid)?;
+    let period = if query.indicators { Period::Y5 } else { period };
     let _slot = state
         .history_slots
         .try_acquire()
@@ -226,20 +243,42 @@ async fn history(
     }
 
     let fetched_at = sourced.fetched_at;
-    let result = sourced.map(|history| DailyHistory {
-        symbol,
-        range: query.range,
-        currency: history.currency.and_then(|currency| {
-            let code = currency.trim().to_ascii_uppercase();
-            (code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_uppercase())).then_some(code)
-        }),
-        points: daily_points(
+    let as_of = fetched_at
+        .with_timezone(&idx::model::wib())
+        .date_naive()
+        .min(today);
+    let window_start = as_of
+        .checked_sub_months(Months::new(60))
+        .ok_or_else(unavailable)?;
+    let calculation = query.indicators.then(|| Calculation {
+        method: "idx.technical.v1",
+        basis: "close",
+        window_start,
+        as_of,
+        calendar_years: holidays::years(),
+    });
+    let result = sourced.map(|history| {
+        let mut points = daily_points(
             history.candles,
             history.close_only,
-            start,
+            calculation.as_ref().map_or(start, |c| c.window_start),
             today,
             fetched_at,
-        ),
+        );
+        if calculation.is_some() {
+            indicator_window(&mut points, start);
+        }
+        DailyHistory {
+            symbol,
+            range: query.range,
+            calculation,
+            points,
+            currency: history.currency.and_then(|currency| {
+                let code = currency.trim().to_ascii_uppercase();
+                (code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_uppercase()))
+                    .then_some(code)
+            }),
+        }
     });
     Ok(Json(public_envelope(SCHEMA_DAILY_HISTORY, result)))
 }
@@ -284,6 +323,7 @@ fn daily_points(
                 return None;
             }
             Some(DailyPoint {
+                indicators: None,
                 date,
                 bar_time,
                 open: ohl.map(|p| p.0),
@@ -300,6 +340,45 @@ fn daily_points(
     points.dedup_by_key(|p| p.date);
     points.reverse();
     points
+}
+
+fn indicator_window(points: &mut Vec<DailyPoint>, start: NaiveDate) {
+    attach_indicators(points);
+    points.retain(|p| p.date >= start);
+}
+
+// Split before computing so recursive seeds and rolling windows cannot bridge missing sessions.
+fn attach_indicators(points: &mut [DailyPoint]) {
+    let eligible = |p: &DailyPoint| {
+        !p.provisional && holidays::covers(p.date.year()) && holidays::is_trading_day(p.date)
+    };
+    let mut remaining = points;
+    while let Some((first, rest)) = remaining.split_first_mut() {
+        if !eligible(first) {
+            remaining = rest;
+            continue;
+        }
+        let mut previous = first.date;
+        let count = rest
+            .iter()
+            .take_while(|p| {
+                let consecutive = eligible(p) && holidays::next_trading_day(previous) == p.date;
+                previous = p.date;
+                consecutive
+            })
+            .count();
+        let (continuation, tail) = rest.split_at_mut(count);
+        let closes: Vec<_> = std::iter::once(first.close)
+            .chain(continuation.iter().map(|p| p.close))
+            .collect();
+        for (point, values) in std::iter::once(first)
+            .chain(continuation)
+            .zip(daily_indicators(&closes))
+        {
+            point.indicators = Some(values);
+        }
+        remaining = tail;
+    }
 }
 
 fn market_open(now: DateTime<Utc>) -> Option<bool> {
@@ -602,9 +681,16 @@ mod tests {
             period: Period,
             interval: Interval,
         ) -> idx::Result<Sourced<History>> {
-            assert_eq!(period, Period::M1);
+            assert_eq!(period, if self.1 { Period::Y5 } else { Period::M1 });
             assert_eq!(interval, Interval::Day1);
-            let time = Utc::now().with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).unwrap());
+            let wib = idx::model::wib();
+            let time = Utc::now()
+                .with_timezone(&wib)
+                .date_naive()
+                .and_hms_opt(0, 0, 0)
+                .unwrap()
+                .and_local_timezone(wib)
+                .unwrap();
             let candle = idx::model::Candle {
                 time,
                 open: 100.0,
@@ -682,6 +768,92 @@ mod tests {
         assert_eq!(points[0]["adjusted_close"], 110.0);
         assert!(points[0]["bar_time"].as_str().unwrap().ends_with("+07:00"));
         assert!(points[0]["volume"].is_null());
+    }
+
+    #[tokio::test]
+    async fn indicator_ranges_request_same_source_and_crop_after_calculation() {
+        let app = router(Arc::new(Fixture(0.into(), true)), one_issuer(), vec![]);
+        let (status, short) = request(
+            app.clone(),
+            "/api/history?symbol=BBCA&range=3w&indicators=true",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let (status, long) =
+            request(app, "/api/history?symbol=BBCA&range=3y&indicators=true").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(short["data"]["calculation"], long["data"]["calculation"]);
+        assert_eq!(short["data"]["calculation"]["basis"], "close");
+        assert_eq!(short["data"]["points"][0], long["data"]["points"][1]);
+    }
+
+    #[test]
+    fn visual_window_does_not_change_warmed_up_values() {
+        let as_of: NaiveDate = "2026-11-27".parse().unwrap();
+        let rows = || {
+            let mut date: NaiveDate = "2026-01-02".parse().unwrap();
+            let mut rows = Vec::new();
+            while date <= as_of {
+                if holidays::is_trading_day(date) {
+                    rows.push(DailyPoint {
+                        date,
+                        bar_time: date
+                            .and_hms_opt(9, 0, 0)
+                            .unwrap()
+                            .and_local_timezone(idx::model::wib())
+                            .unwrap(),
+                        open: None,
+                        high: None,
+                        low: None,
+                        close: 100.0 + (rows.len() % 17) as f64,
+                        adjusted_close: Some(75.0),
+                        volume: None,
+                        indicators: None,
+                        provisional: false,
+                    });
+                }
+                date = date.succ_opt().unwrap();
+            }
+            rows
+        };
+        let mut short = rows();
+        let mut long = rows();
+        indicator_window(&mut short, history_window("3w", as_of).unwrap().1);
+        indicator_window(&mut long, history_window("3y", as_of).unwrap().1);
+        assert!(short.len() < 20 && short[0].indicators.as_ref().unwrap().sma200.is_some());
+        assert_eq!(
+            serde_json::to_value(&short).unwrap(),
+            serde_json::to_value(&long[long.len() - short.len()..]).unwrap()
+        );
+    }
+
+    #[test]
+    fn studies_restart_after_a_missing_session_and_exclude_provisional_and_unknown_dates() {
+        let make = |day: &str, provisional| DailyPoint {
+            date: day.parse().unwrap(),
+            bar_time: format!("{day}T09:00:00+07:00").parse().unwrap(),
+            open: None,
+            high: None,
+            low: None,
+            close: 100.0,
+            adjusted_close: Some(60.0),
+            volume: None,
+            indicators: None,
+            provisional,
+        };
+        let mut points = [
+            make("2025-12-30", false),
+            make("2026-11-06", false),
+            make("2026-11-09", false),
+            make("2026-11-11", false),
+            make("2026-11-12", true),
+            make("2026-11-13", false),
+        ];
+        attach_indicators(&mut points);
+        assert_eq!(
+            points.map(|p| p.indicators.map(|v| v.observations)),
+            [None, Some(1), Some(2), Some(1), None, Some(1)]
+        );
     }
 
     #[test]

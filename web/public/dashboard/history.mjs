@@ -5,6 +5,13 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
   const $ = id => document.getElementById(id);
   const { number, money, date } = formatting;
   const { tr, setLocalizedMessage } = i18n;
+  const stockPage = document.body?.dataset?.page === "stock";
+  const controls = stockPage ? $("indicator-controls") : null;
+  const selectedIndicators = () => Array.from(controls?.querySelectorAll("input:checked") || [], input => input.value);
+  controls?.addEventListener("change", () => {
+    chart?.setIndicators(selectedIndicators());
+    showHistoryObservation();
+  });
   let historyData;
   let geometry;
   let historyRequest;
@@ -42,6 +49,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
         $("history-point").value = String(index);
         showHistoryObservation();
       });
+      if (controls && historyData.calculation) chart.setIndicators(selectedIndicators());
       $("history-data").classList.add("interactive");
     } catch {
       if (chartVersion !== version) return;
@@ -104,6 +112,24 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
         + " · " + tr("Terendah ", "Low ") + historyPrice(point.low, currency) : "")
       + " · " + tr("Volume ", "Volume ") + number(point.volume)
       + (point.provisional ? tr(" · Sementara saat data diambil (*)", " · Provisional when fetched (*)") : "");
+    if (controls) {
+      controls.disabled = !historyData.calculation;
+      const row = point.indicators;
+      const values = selectedIndicators().map(key => {
+        const value = row?.[key];
+        if (key === "macd" && value) return "MACD / Signal / Δ " +
+          [value.line, value.signal, value.histogram].map(v => number(v)).join(" / ");
+        return key.toUpperCase() + " " + number(value);
+      });
+      let reason = "";
+      if (!historyData.calculation) reason = tr("Indikator tidak tersedia.", "Indicators unavailable.");
+      else if (values.length && !row) reason = point.provisional
+        ? tr("Sesi sementara.", "Provisional session.")
+        : tr("Sesi di luar kalender terverifikasi.", "Session outside verified calendar.");
+      else if (values.length && selectedIndicators().some(key => row?.[key] == null))
+        reason = number(row.observations) + tr(" sesi berurutan tersedia.", " consecutive sessions available.");
+      $("indicator-readout").textContent = [point.date, ...values, reason].filter(Boolean).join(" · ");
+    }
     slider.setAttribute("aria-valuetext", label);
     $("history-observation").textContent = label;
   }
@@ -137,7 +163,17 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     $("history-retry").hidden = true;
     setLocalizedMessage(status, () => tr("Memuat histori ", "Loading history for ") + symbol + "…");
     try {
-      const response = await api.get("/api/history?" + new URLSearchParams({ symbol, range }), request.signal);
+      const path = "/api/history?" + new URLSearchParams({ symbol, range });
+      let response;
+      if (stockPage) {
+        try {
+          response = await api.get(path + "&indicators=true", request.signal);
+        } catch (error) {
+          if (request.signal.aborted) throw error;
+          // Older API releases and providers without five-year history can still serve prices.
+          response = await api.get(path, request.signal);
+        }
+      } else response = await api.get(path, request.signal);
       if (historyRequest !== request) return;
       const { data, provider, stale, cached, warnings, fetched_at } = ensureEnvelope(response, "idx.daily-history.v1",
         data => validHistory(data, symbol, range));

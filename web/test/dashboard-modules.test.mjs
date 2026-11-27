@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { segments } from "../public/dashboard/indicator-series.mjs";
 import { createApi, ensureEnvelope } from "../public/dashboard/api.mjs";
 import { createFormatting } from "../public/dashboard/format.mjs";
 import { completeOhlc, calendarDay, validHistory, historyGeometry, historyPosition } from "../public/dashboard/history-data.mjs";
@@ -49,4 +50,12 @@ test("candlesticks require observed, coherent prices and accept a genuine flat s
     { low: 110 }, { open: Infinity }, { close: 0 }]) {
     assert.equal(completeOhlc({ ...flat, ...override }), false);
   }
+});
+
+test("indicator lines split across missing values and calculation resets", () => {
+  const points = [20, 21, 1, 20, 21].map((observations, i) => ({
+    date: "2026-11-" + (10 + i), indicators: { observations, sma20: observations < 20 ? null : 100 },
+  }));
+  assert.deepEqual(segments(points, "sma20").map(group => group.length), [2, 2]);
+  assert.deepEqual(segments(points, "macd", "line"), []);
 });

@@ -130,3 +130,42 @@ The [Phase 3.6 modularization decision and MPA/indicators proposals](https://git
 record the new module boundaries and approval gates.
 
 Clone this fork with `git clone https://github.com/Thomasfilemon/idx.git`, check out `development`, and follow [CONTRIBUTING.md](../CONTRIBUTING.md) for local tests. For original CLI/API behavior and data-provider details, consult [the upstream repository](https://github.com/fzn0x/idx). The code remains subject to the existing [LICENSE](../LICENSE). This is a learning project, not financial advice.
+
+### Technical indicators in Stock Explorer
+
+Stock Explorer requests `GET /api/history?symbol=BBCA&range=3w&indicators=true`.
+The opt-in returns prices and studies from one cached provider response, with
+the original currency, fetch time and stale flags. A client omitting the flag
+uses the existing range-specific history contract. If five-year history fails
+the explorer retries price history alone and labels the unavailable indicators.
+
+The calculation requests five years of daily observations regardless of the
+visible range. The server normalizes WIB dates, takes the latest observation
+per session, computes oldest first, then trims to the requested chart window.
+`data.calculation` specifies the version, price basis, calendar coverage, as-of
+date and window start. Identical source snapshot and session rules produce
+identical values on overlapping dates. Provider revisions or a new seed window
+can change values across fetches.
+
+All studies use finite, positive **provider close**. Adjusted close is a
+separate historical field. A valid close without full OHLC qualifies for these
+close-based studies. Skip provisional candles, holidays and sessions outside
+the verified calendar. A missing expected trading session or invalid close
+restarts the warm-up. No interpolation or carried-forward outputs. For
+eligible points `indicators.observations` counts the continuous segment.
+Insufficient history yields null per study. Ineligible points omit
+`indicators`. A provisional candle on the chart can therefore have a price
+and no indicator values.
+
+| Study | Minimum consecutive closes | Convention |
+| --- | ---: | --- |
+| SMA20, SMA50, SMA200 | 20, 50, 200 | Arithmetic mean of the most recent N closes |
+| EMA20 | 20 | First 20-close SMA seeds the series, then alpha 2/21 |
+| RSI14 | 15 | Wilder smoothing over 14 changes. Zero average loss gives 100, including a flat series. Zero gain with losses gives 0. |
+| MACD(12,26,9) | 35 | SMA-seeded EMA12 minus EMA26, EMA9 signal, histogram = line minus signal. The first published result retains the CLI threshold. |
+
+CLI and MCP use the same Rust EMA, RSI, SMA and MACD methods. Comparing
+outputs requires the same dates, seed and eligible inputs. Stock Explorer
+starts with SMA20 enabled. Optional price overlays and independent RSI/MACD
+panes share the price chart's time scale, zoom, pan and crosshair. The
+keyboard date slider and numeric readout provide the values without a mouse.

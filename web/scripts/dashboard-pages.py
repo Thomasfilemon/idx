@@ -41,6 +41,8 @@ def pages(destination):
             chart = chart.strip().removeprefix('<details id="history-panel" class="history-panel">').removesuffix("</details>")
             chart = chart.replace('<summary data-en="Historical chart">Grafik historis</summary>',
                                   '<h2 id="chart-heading"><span id="chart-symbol"></span> · <span data-en="Historical chart">Grafik historis</span></h2>')
+            chart = chart.replace('aria-describedby="history-observation"',
+                                  'aria-describedby="history-observation indicator-readout"')
             panel = '<section id="history-panel" class="history-panel" aria-labelledby="chart-heading">' + chart + '</section>'
             html = (before + after).replace('<div class="dashboard-body">', panel + '\n<div class="dashboard-body">')
 

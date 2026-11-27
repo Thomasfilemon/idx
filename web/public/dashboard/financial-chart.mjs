@@ -1,3 +1,4 @@
+import { indicators, segments } from "./indicator-series.mjs";
 import { createChart, CandlestickSeries, LineSeries, HistogramSeries, ColorType } from "./vendor/lightweight-charts-5.0.9.mjs";
 
 // The native time scale keeps volume, gestures and crosshair aligned to the same session.
@@ -33,9 +34,41 @@ export function createFinancialChart(host, points, mode, locale, onInspect) {
         String(day.day).padStart(2, "0")].join("-");
       if (indices.has(key)) onInspect(indices.get(key));
     });
+    let studies = [];
+    function setIndicators(keys) {
+      for (const study of studies.reverse()) chart.removeSeries(study);
+      studies = [];
+      function plot(key, pane, component, color) {
+        const [name, defaultColor] = indicators[key];
+        const groups = segments(points, key, component);
+        for (const group of groups) {
+          const histogram = component === "histogram";
+          const study = chart.addSeries(histogram ? HistogramSeries : LineSeries, {
+            color: color || defaultColor, lineWidth: 2, priceLineVisible: false,
+            lastValueVisible: group === groups.at(-1),
+            title: component ? name + " " + component : name,
+          }, pane);
+          study.setData(group);
+          studies.push(study);
+        }
+      }
+      for (const key of keys) {
+        if (key !== "macd" && key !== "rsi14") plot(key, 0);
+      }
+      if (keys.includes("rsi14")) plot("rsi14", 1);
+      if (keys.includes("macd")) {
+        const pane = chart.panes().length;
+        plot("macd", pane, "histogram", "#8898aa");
+        plot("macd", pane, "line");
+        plot("macd", pane, "signal", "#ffd166");
+      }
+      host.style.height = chart.panes().length > 1 ? (330 + 140 * (chart.panes().length - 1)) + "px" : "";
+      for (const pane of chart.panes().slice(1)) pane.setHeight(140);
+    }
     chart.timeScale().fitContent();
     return {
-      remove: () => chart.remove(),
+      setIndicators,
+      remove: () => { chart.remove(); host.style.height = ""; },
       locale: locale => chart.applyOptions({ localization: { locale } }),
       inspect: p => chart.setCrosshairPosition(p.close, p.date, series),
     };

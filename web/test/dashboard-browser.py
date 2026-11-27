@@ -3,7 +3,7 @@
 import argparse
 import subprocess
 import tempfile
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 import sys
 from pathlib import Path
 
@@ -68,12 +68,24 @@ def smoke(browser, name, width, screenshots):
             else:
                 route.fulfill(json=QUOTES, headers=cors)
         elif url.startswith(f"{API}/api/history?"):
-            range_code = url.rsplit("=", 1)[-1]
+            params = parse_qs(urlsplit(url).query)
+            range_code = params["range"][0]
+            symbol = params["symbol"][0]
+            if symbol == "TLKM":
+                route.fulfill(status=503, json={"error": {"code": "unavailable"}}, headers=cors)
+                return
+            if symbol == "BBCA":
+                route.fulfill(headers=cors, json={"schema": "idx.daily-history.v1", **OPTIONS,
+                    "data": {"symbol": symbol, "range": range_code, "currency": "IDR", "points": []}})
+                return
             ohl = {"open": 3700, "high": 3800, "low": 3650} if range_code == "3mo" else {}
+            calculation = {"calculation": {"method": "idx.technical.v1", "basis": "close"}} if "indicators" in params else {}
+            study = {"indicators": {"observations": 215, "sma20": 3610, "rsi14": 60,
+                                   "macd": {"line": 5, "signal": 2, "histogram": 3}}}
             route.fulfill(headers=cors, json={
-                "schema": "idx.daily-history.v1", **OPTIONS,
-                "data": {"symbol": "BBRI", "range": range_code, "currency": "IDR", "points": [
-                    {**ohl, "date": "2026-11-19", "close": 3700, "volume": None, "adjusted_close": 3650},
+                "schema": "idx.daily-history.v1", **OPTIONS, "stale": "indicators" in params,
+                "data": {**calculation, "symbol": "BBRI", "range": range_code, "currency": "IDR", "points": [
+                    {**ohl, **study, "date": "2026-11-19", "close": 3700, "volume": None, "adjusted_close": 3650},
                     {**ohl, "date": "2026-11-20", "close": 3750, "volume": 1200, "provisional": True},
                 ]},
             })
@@ -216,6 +228,25 @@ def smoke(browser, name, width, screenshots):
     page.locator("#history-style").select_option("line")
     expect(page.locator("#history-data")).to_have_class("interactive")
     expect(page.locator("#history-observation")).to_contain_text("Tertinggi")
+    controls = page.locator("#indicator-controls")
+    baseline = page.locator("#financial-chart canvas").count()
+    controls.get_by_label("RSI14").check()
+    controls.get_by_label("MACD").check()
+    assert page.locator("#financial-chart canvas").count() > baseline
+    page.locator("#history-point").press("Home")
+    expect(page.locator("#indicator-readout")).to_contain_text("RSI14 60")
+    controls.get_by_label("RSI14").uncheck()
+    controls.get_by_label("MACD").uncheck()
+    expect(page.locator("#financial-chart canvas")).to_have_count(baseline)
+    expect(page.locator("#history-status")).to_contain_text("Data lama")
+    page.locator("#symbol").fill("BBCA")
+    page.locator("#add").click()
+    expect(page.locator("#history-status")).to_contain_text("Belum ada data historis BBCA")
+    expect(page.locator("#financial-chart")).to_be_hidden()
+    page.locator("#symbol").fill("TLKM")
+    page.locator("#add").click()
+    expect(page.locator("#history-retry")).to_be_visible()
+    expect(page.locator("#history-status")).to_contain_text("Histori TLKM belum dapat dimuat")
     assert not errors, errors
     page.close()
     print(f"{name}: layout, keyboard interaction and recovery passed", flush=True)

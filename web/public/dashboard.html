@@ -152,13 +152,24 @@
                 <p id="history-status" class="notice" role="status"></p>
                 <button id="history-retry" class="action-button" type="button" hidden data-en="Retry history">Muat ulang histori</button>
                 <div id="history-data" hidden>
-                  <p id="history-dates" class="notice"></p>
-                  <p id="history-currency" class="notice"></p>
-                  <p class="notice" data-en="Chart uses provider prices. Adjusted close is listed separately when available.">Grafik memakai harga asli provider. Harga penutupan disesuaikan tersedia terpisah jika dikirim provider.</p>
                   <label for="history-style" data-en="Price chart">Grafik harga</label>
                   <select id="history-style"><option value="candlestick">Candlestick</option><option value="line" data-en="Line">Garis</option></select>
                   <p id="history-chart-status" class="notice" role="status"></p>
                   <div id="financial-chart" hidden></div>
+<!-- pages stock -->
+                  <fieldset id="indicator-controls"><legend data-en="Technical indicators">Indikator teknikal</legend>
+                    <label><input type="checkbox" value="sma20" checked> SMA20</label>
+                    <label><input type="checkbox" value="sma50"> SMA50</label>
+                    <label><input type="checkbox" value="sma200"> SMA200</label>
+                    <label><input type="checkbox" value="ema20"> EMA20</label>
+                    <label><input type="checkbox" value="rsi14"> RSI14</label>
+                    <label><input type="checkbox" value="macd"> MACD</label>
+                  </fieldset>
+                  <p id="indicator-readout" class="notice"></p>
+<!-- end pages -->
+                  <p id="history-dates" class="notice"></p>
+                  <p id="history-currency" class="notice"></p>
+                  <p class="notice" data-en="Chart uses provider prices. Adjusted close is listed separately when available.">Grafik memakai harga asli provider. Harga penutupan disesuaikan tersedia terpisah jika dikirim provider.</p>
                   <small><a href="https://www.tradingview.com/" rel="noopener">TradingView Lightweight Charts™ · © 2025 TradingView, Inc.</a></small>
                   <figure><figcaption data-en="Provider closing price">Harga penutupan dari provider</figcaption>
                     <svg viewBox="0 0 400 116" preserveAspectRatio="none" aria-hidden="true"><path id="history-price-path"></path><path id="history-price-guide" class="history-guide"></path></svg>
