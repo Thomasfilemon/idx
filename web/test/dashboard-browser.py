@@ -196,7 +196,7 @@ def smoke(browser, name, width, screenshots):
     expect(page.get_by_text("Historical chart", exact=True)).to_be_visible()
     expect(page.locator("#gainers-list")).to_contain_text("without a market-cap filter")
     expect(page.get_by_text("Highest volume · 1,200 shares")).to_be_visible()
-    expect(page.get_by_role("table", name="Daily historical records")).to_be_visible()
+    expect(page.get_by_role("table", name="Historical records")).to_be_visible()
     assert quote_requests == 3
     expect(page.get_by_role("slider", name="Inspect an observation")).to_have_attribute(
         "aria-valuetext", "2026-11-19 · Close Rp3,700 · Volume —"
