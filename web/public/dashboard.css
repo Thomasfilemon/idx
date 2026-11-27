@@ -125,3 +125,7 @@
 #financial-chart svg { width: auto; border: 0; }
 #history-data.interactive figure svg { display: none; }
 .detail { min-width: 0; }
+[data-page="stock"] #history-panel { padding: clamp(12px, 3vw, 32px); margin: 0; min-width: 0; border-bottom: 1px solid #344454; }
+[data-page="stock"] #chart-heading { margin: 0 0 12px; font-size: clamp(1.2rem, 3vw, 1.65rem); }
+[data-page="stock"] .dashboard-section { padding-top: 24px; }
+[data-page="stock"] .dashboard-heading { margin-bottom: 12px; }

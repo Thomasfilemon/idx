@@ -113,13 +113,14 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
   });
   $("history-records").addEventListener("toggle", renderTable);
   async function updateHistory(force = false) {
-    if (!$("history-panel").open) {
+    if (document.body?.dataset?.page !== "stock" && !$("history-panel").open) {
       historyRequest?.abort();
       historyRequest = undefined;
       historyKey = "";
       return;
     }
     const symbol = selectedSymbol();
+    if (document.body?.dataset?.page === "stock") $("chart-symbol").textContent = symbol;
     const range = $("history-range").value;
     const key = symbol + ":" + range;
     if (!force && key === historyKey) return;

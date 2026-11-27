@@ -102,7 +102,7 @@ origin of the independently hosted API. An empty value retains relative
 `/idx/market.html`, and the watchlist and history at
 `/idx/stock.html?symbol=BBCA&range=1mo`. The combined view remains available
 at `/idx/dashboard.html`; the old landing dashboard fragment opens that view.
-Open Grafik historis to fetch a range. Candlestick is the default for complete
+Stock Explorer loads the selected stock’s chart on entry and updates it on selection. The combined dashboard loads history when expanded. Candlestick is the default for complete
 OHLC, and Line uses raw provider closes. The time axis spaces reported sessions
 in order. The volume overlay uses shares. Crosshair, pan, pinch/wheel zoom,
 the keyboard observation slider and the on-demand records table support inspection.

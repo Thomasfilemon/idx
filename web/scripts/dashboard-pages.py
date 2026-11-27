@@ -36,6 +36,14 @@ def pages(destination):
                 'Indonesian Market Data">Thomas IDX Lab — Data Saham Indonesia',
                 f'{english}">Thomas IDX Lab — {title}')
         if page == "stock":
+            before, chart_and_after = html.split("<!-- history start -->")
+            chart, after = chart_and_after.split("<!-- history end -->")
+            chart = chart.strip().removeprefix('<details id="history-panel" class="history-panel">').removesuffix("</details>")
+            chart = chart.replace('<summary data-en="Historical chart">Grafik historis</summary>',
+                                  '<h2 id="chart-heading"><span id="chart-symbol"></span> · <span data-en="Historical chart">Grafik historis</span></h2>')
+            panel = '<section id="history-panel" class="history-panel" aria-labelledby="chart-heading">' + chart + '</section>'
+            html = (before + after).replace('<div class="dashboard-body">', panel + '\n<div class="dashboard-body">')
+
             html = html.replace('<span id="mode" class="mode" data-en="Loading market data…">Memuat data pasar…</span>', '')
         (destination / file).write_text(html, encoding="utf-8")
 

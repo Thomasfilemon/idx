@@ -48,6 +48,7 @@ export function initDashboard({ document, fetch, storage }) {
   }
   if (stockPage) {
     $("history-range").value = route.range;
+    history.update();
     saveRoute("replaceState");
     $("history-range").addEventListener("change", () => saveRoute("pushState"));
     browser.addEventListener("popstate", () => {
@@ -68,7 +69,10 @@ export function initDashboard({ document, fetch, storage }) {
     watchlist?.load();
   }
   $("refresh").addEventListener("click", () => {
-    if (!market?.isLoading() && !watchlist?.isLoading()) load();
+    if (!market?.isLoading() && !watchlist?.isLoading()) {
+      load();
+      if (stockPage) history.update(true);
+    }
   });
   $("retry-market")?.addEventListener("click", () => {
     $("refresh").focus();
