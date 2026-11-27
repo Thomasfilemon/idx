@@ -348,6 +348,7 @@ mod tests {
             })
             .collect();
         let h = History {
+            close_only: Vec::new(),
             symbol: Symbol::parse("TEST").unwrap(),
             name: Some("Test Co".into()),
             currency: Some("IDR".into()),

@@ -367,6 +367,79 @@ pub async fn market_overview(
     top: usize,
     liquid_floor: f64,
 ) -> Result<Sourced<MarketOverview>> {
+    market_overview_inner(p, universe, index, top, liquid_floor, false)
+        .await
+        .map(|sourced| sourced.map(|result| result.overview))
+}
+
+#[derive(Clone)]
+pub struct MarketWithMoverFallback {
+    pub overview: MarketOverview,
+    pub gainers_fallback: bool,
+    pub losers_fallback: bool,
+}
+
+/// REST board: rank traded quotes from the same snapshot if missing market
+/// caps would otherwise leave either direction empty.
+pub async fn market_overview_with_mover_fallback(
+    p: &dyn Provider,
+    universe: &[Issuer],
+    index: &Symbol,
+    top: usize,
+    liquid_floor: f64,
+) -> Result<Sourced<MarketWithMoverFallback>> {
+    market_overview_inner(p, universe, index, top, liquid_floor, true).await
+}
+
+fn rank_market_movers(
+    rows: &[MarketRow],
+    top: usize,
+    floor: f64,
+    gainers: bool,
+    allow_fallback: bool,
+) -> (Vec<MarketRow>, bool) {
+    let directional = rows.iter().filter(|row| {
+        row.volume.unwrap_or(0) > 0
+            && row
+                .price
+                .is_some_and(|price| price.is_finite() && price > 0.0)
+            && row.change_pct.is_some_and(|change| {
+                change.is_finite() && if gainers { change > 0.0 } else { change < 0.0 }
+            })
+    });
+    let mut ranked: Vec<_> = directional
+        .clone()
+        .filter(|row| row.market_cap.unwrap_or(0.0) >= floor)
+        .collect();
+    let fallback = top > 0
+        && allow_fallback
+        && ranked.is_empty()
+        && directional.clone().any(|row| {
+            !row.market_cap
+                .is_some_and(|cap| cap.is_finite() && cap > 0.0)
+        });
+    if fallback {
+        ranked.extend(directional);
+    }
+    ranked.sort_by(|a, b| {
+        let order = a
+            .change_pct
+            .partial_cmp(&b.change_pct)
+            .unwrap_or(std::cmp::Ordering::Equal);
+        (if gainers { order.reverse() } else { order })
+            .then_with(|| a.symbol.as_str().cmp(b.symbol.as_str()))
+    });
+    (ranked.into_iter().take(top).cloned().collect(), fallback)
+}
+
+async fn market_overview_inner(
+    p: &dyn Provider,
+    universe: &[Issuer],
+    index: &Symbol,
+    top: usize,
+    liquid_floor: f64,
+    allow_fallback: bool,
+) -> Result<Sourced<MarketWithMoverFallback>> {
     if universe.is_empty() {
         return Err(IdxError::Usage("the ticker universe is empty".into()));
     }
@@ -401,22 +474,10 @@ pub async fn market_overview(
         .collect();
     let as_of = out.data.iter().filter_map(|q| q.market_time).max();
     let chg = |r: &MarketRow| r.change_pct.unwrap_or(0.0);
-    let liquid: Vec<&MarketRow> = rows
-        .iter()
-        .filter(|r| r.market_cap.unwrap_or(0.0) >= liquid_floor && r.volume.unwrap_or(0) > 0)
-        .collect();
-    let mut gainers: Vec<&MarketRow> = liquid.iter().copied().filter(|r| chg(r) > 0.0).collect();
-    gainers.sort_by(|a, b| {
-        chg(b)
-            .partial_cmp(&chg(a))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let mut losers: Vec<&MarketRow> = liquid.iter().copied().filter(|r| chg(r) < 0.0).collect();
-    losers.sort_by(|a, b| {
-        chg(a)
-            .partial_cmp(&chg(b))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    let (gainers, gainers_fallback) =
+        rank_market_movers(&rows, top, liquid_floor, true, allow_fallback);
+    let (losers, losers_fallback) =
+        rank_market_movers(&rows, top, liquid_floor, false, allow_fallback);
     let mut by_value: Vec<&MarketRow> = rows.iter().filter(|r| r.value.is_some()).collect();
     by_value.sort_by(|a, b| {
         b.value
@@ -446,12 +507,16 @@ pub async fn market_overview(
         unchanged: rows.iter().filter(|r| chg(r) == 0.0).count(),
         turnover: rows.iter().filter_map(|r| r.value).sum(),
         liquid_min_market_cap: liquid_floor,
-        gainers: take(gainers),
-        losers: take(losers),
+        gainers,
+        losers,
         most_active: take(by_value),
         heavyweights: take(by_cap),
     };
-    Ok(out.map(|_| data))
+    Ok(out.map(|_| MarketWithMoverFallback {
+        overview: data,
+        gainers_fallback,
+        losers_fallback,
+    }))
 }
 
 /// Price performance from five years of daily candles for each symbol, with
@@ -2253,6 +2318,44 @@ pub async fn intraday(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn market_movers_fall_back_only_for_the_direction_missing_market_cap() {
+        let row = |symbol: &str, pct, cap, volume| crate::model::MarketRow {
+            symbol: crate::model::Symbol::parse(symbol).unwrap(),
+            name: None,
+            price: Some(100.0),
+            change: None,
+            change_pct: Some(pct),
+            volume,
+            value: None,
+            market_cap: cap,
+        };
+        let rows = [
+            row("BBCA", 2.0, Some(200.0), Some(10)),
+            row("BBRI", 5.0, None, Some(10)),
+            row("BMRI", -1.0, None, Some(10)),
+            row("TLKM", -4.0, None, Some(10)),
+            row("ASII", -10.0, None, Some(0)),
+            row("UNVR", -20.0, None, None),
+        ];
+        let (gainers, fallback) = super::rank_market_movers(&rows, 5, 100.0, true, true);
+        assert!(!fallback);
+        assert_eq!(gainers.len(), 1);
+        assert_eq!(gainers[0].symbol.as_str(), "BBCA");
+        let (losers, fallback) = super::rank_market_movers(&rows, 2, 100.0, false, true);
+        assert!(fallback);
+        assert_eq!(losers.len(), 2);
+        assert_eq!(losers[0].symbol.as_str(), "TLKM");
+        assert_eq!(losers[1].symbol.as_str(), "BMRI");
+        assert!(super::rank_market_movers(&rows, 5, 100.0, false, false)
+            .0
+            .is_empty());
+        let known_small = [row("BMRI", -1.0, Some(50.0), Some(10))];
+        let (losers, fallback) = super::rank_market_movers(&known_small, 5, 100.0, false, true);
+        assert!(losers.is_empty());
+        assert!(!fallback);
+    }
+
     use super::*;
     use crate::model::{History, Quote};
 
@@ -2813,6 +2916,7 @@ mod tests {
                 self.asked.lock().unwrap().push(p);
                 let mut out = Sourced::fresh(
                     History {
+                        close_only: Vec::new(),
                         symbol: s.clone(),
                         name: None,
                         currency: None,
@@ -3558,6 +3662,7 @@ mod tests {
                     .collect::<Vec<_>>();
                 Ok(Sourced::fresh(
                     History {
+                        close_only: Vec::new(),
                         symbol: s.clone(),
                         name: None,
                         currency: None,

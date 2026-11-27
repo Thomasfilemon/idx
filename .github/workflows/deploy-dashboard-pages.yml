@@ -1,0 +1,89 @@
+name: Deploy IDX Dashboard
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [development, main]
+    paths:
+      - 'web/public/dashboard.html'
+      - 'web/public/dashboard.css'
+      - 'web/public/dashboard.js'
+      - 'web/public/dashboard/**'
+      - 'data/universe.csv'
+      - 'web/scripts/issuer-catalog.py'
+      - 'web/scripts/dashboard-pages.py'
+      - '.github/workflows/deploy-dashboard-pages.yml'
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-dashboard
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # Until cutover, only development may publish to the single Pages site.
+    if: github.ref_name == (vars.PAGES_DEPLOY_BRANCH || 'development')
+    name: Publish dashboard
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+      - name: Prepare static site
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+          python3 web/scripts/dashboard-pages.py _site
+          cp web/public/dashboard.css _site/dashboard.css
+          cp web/public/dashboard.js _site/dashboard.js
+          # A release-specific module directory prevents mixed cached module graphs.
+          cp -R web/public/dashboard "_site/dashboard-${GITHUB_SHA}"
+          sed -i "s|\./dashboard/|./dashboard-${GITHUB_SHA}/|g" _site/dashboard.js
+          test -s "_site/dashboard-${GITHUB_SHA}/app.mjs"
+          python3 web/scripts/issuer-catalog.py > _site/issuer-catalog.json
+          touch _site/.nojekyll
+          test -s _site/index.html
+          grep -q 'market analytics' _site/index.html
+          test -s _site/dashboard.css
+          test -s _site/dashboard.js
+          grep -q 'href="./dashboard.css"' _site/index.html
+          grep -q 'src="./dashboard.js"' _site/index.html
+          # Keep the HTML and its assets in sync across independent CDN caches.
+          sed -i -e "s|\./dashboard.css|./dashboard.css?v=${GITHUB_SHA}|g" \
+            -e "s|\./dashboard.js|./dashboard.js?v=${GITHUB_SHA}|g" \
+            -e "s|name=\"idx-build\" content=\"\"|name=\"idx-build\" content=\"${GITHUB_SHA}\"|" _site/*.html
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+          name: github-pages-${{ github.run_attempt }}
+      - name: Wait for artifact metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_NAME: github-pages-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in {1..12}; do
+            count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?name=${ARTIFACT_NAME}" \
+              --jq '[.artifacts[] | select(.expired == false)] | length') || count=0
+            if [[ "$count" == "1" ]]; then exit 0; fi
+            sleep 5
+          done
+          echo "Pages artifact metadata unavailable after 60 seconds" >&2
+          exit 1
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ github.run_attempt }}

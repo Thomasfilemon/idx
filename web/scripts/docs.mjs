@@ -41,6 +41,7 @@ export const PAGES = [
   { slug: "configuration", src: "docs/configuration.md", nav: "Configuration", panel: "Konfigurasi", desc: "Config file, IDX_* environment variables, cache location and lifetimes." },
   { slug: "ownership", src: "docs/ownership.md", nav: "Ownership data", panel: "Kepemilikan", desc: "The KSEI register of holders above 1 %: source files, the GitHub mirror, the local database and its queries." },
   { slug: "stockbit", src: "docs/stockbit.md", nav: "Stockbit realtime", panel: "Stockbit", desc: "The opt-in Stockbit provider: logging in, the order book, corporate actions, the calendar and holder movements, the MCP tools and where the session lives." },
+  { slug: "thomas-lab", src: "docs/thomas-lab.md", nav: "Thomas IDX Lab", panel: "Thomas Lab", desc: "Independent fork status, infrastructure ownership, and experimental backend deployment plan." },
 ];
 
 export const SUMMARY =

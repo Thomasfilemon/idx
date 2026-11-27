@@ -197,7 +197,8 @@ pub fn looks_like(name: &str, bytes: &[u8]) -> bool {
             let mut txt = false;
             for i in 0..z.len().min(MAX_ENTRIES + 1) {
                 let Ok(f) = z.by_index_raw(i) else { continue };
-                let n = f.name().to_ascii_lowercase();
+                let Ok(entry) = f.name() else { continue };
+                let n = entry.to_ascii_lowercase();
                 if n.starts_with("xl/") || n == "[content_types].xml" {
                     return false;
                 }
@@ -398,7 +399,7 @@ fn parse_zip_limited(bytes: &[u8], max_txt: u64) -> Result<ParsedComposition> {
     let mut txts = 0usize;
     for i in 0..z.len() {
         let f = z.by_index_raw(i).map_err(bad)?;
-        let name = f.name().to_string();
+        let name = f.name().map_err(bad)?.into_owned();
         if escapes(&name) || f.enclosed_name().is_none() {
             return Err(IdxError::Usage(format!(
                 "refusing the ZIP: entry {name:?} points outside the archive (absolute path or ..)"

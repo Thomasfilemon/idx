@@ -1,11 +1,11 @@
 # Contributing
 
-Thanks for helping make Indonesian market data easier to work with.
+Thanks for helping make Indonesian market data easier to work with. This is Thomas's experimental learning fork of [fzn0x/idx](https://github.com/fzn0x/idx); read [docs/thomas-lab.md](docs/thomas-lab.md) before deploying live services.
 
 ## Setup
 
 ```sh
-git clone https://github.com/fzn0x/idx.git
+git clone https://github.com/Thomasfilemon/idx.git
 cd idx
 cargo build
 cargo test

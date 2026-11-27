@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, development]
+  workflow_dispatch:
   pull_request:
 
 env:
@@ -35,6 +36,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets
       - run: cargo run -- --help
+      - run: cargo run --bin idx -- --help
+      - run: cargo test --bin idx-api
 
   web:
     name: web (node tests)
@@ -56,3 +59,31 @@ jobs:
           mcp_ver="$(node -p "require('./npm-mcp/package.json').version")"
           echo "Cargo.toml $cargo_ver · package.json $root_ver · npm/package.json $npm_ver · npm-mcp/package.json $mcp_ver"
           [ "$cargo_ver" = "$root_ver" ] && [ "$cargo_ver" = "$npm_ver" ] && [ "$cargo_ver" = "$mcp_ver" ] || { echo "versions differ: bump all four together"; exit 1; }
+
+  dashboard-browser:
+    name: dashboard browser smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install playwright==1.62.0
+      - run: python web/test/dashboard-browser.py --chrome "$(command -v google-chrome)" --screenshots dashboard-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-screenshots
+          path: dashboard-screenshots/
+          retention-days: 14
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t thomas-idx-api .
+      - name: Verify container liveness
+        run: |
+          docker run -d --name idx-api thomas-idx-api
+          trap 'docker logs idx-api; docker rm -f idx-api' EXIT
+          docker exec idx-api curl -fsS --retry 10 --retry-connrefused --max-time 2 http://127.0.0.1:8000/healthz

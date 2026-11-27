@@ -290,6 +290,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         History {
+            close_only: Vec::new(),
             symbol: Symbol::parse("T").unwrap(),
             name: None,
             currency: None,

@@ -1,6 +1,8 @@
 # web/
 
-Cloudflare Worker behind **https://ihsg.midoriresearch.com**.
+**Fork warning:** This Cloudflare Worker setup documents the upstream project. Thomas does not control `ihsg.midoriresearch.com`, its Cloudflare account, D1 database, or ownership mirror. Do **not** deploy `wrangler.toml` unchanged. The [Thomas IDX Lab dashboard](https://thomasfilemon.github.io/idx/) is currently a static demo without a Thomas-managed live API. See [experimental deployment notes](../docs/thomas-lab.md).
+
+Upstream reference: Cloudflare Worker behind **https://ihsg.midoriresearch.com**.
 
 - `public/` the market page (`index.html`) and the browser terminal (`terminal.html`)
   in Bahasa Indonesia, their English copies under `public/en/`, and the 404 page in

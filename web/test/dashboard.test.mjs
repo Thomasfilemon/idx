@@ -1,0 +1,442 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { initDashboard } from "../public/dashboard/app.mjs";
+
+function setup({ fail = false, invalid = false, fetchOverride, marketData = {}, marketMeta = {} } = {}) {
+  const elements = new Map(), calls = [];
+  let created = 0;
+  const element = () => ({
+    textContent: "", value: "", disabled: false, children: [], style: {}, dataset: {}, attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+    removeAttribute(name) { delete this.attributes[name]; },
+    focus() { document.activeElement = this; this.focused = true; },
+    append(...children) { this.children.push(...children); },
+    replaceChildren(...children) { this.children = children; this.replacements = (this.replacements || 0) + 1; },
+    addEventListener(name, handler) { this[name] = handler; },
+
+  });
+  const document = {
+    querySelector: () => ({ content: "https://api.example.test/" }),
+    createElement: () => { created++; return element(); },
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, element());
+      return elements.get(id);
+    },
+  };
+  initDashboard({
+    storage: { getItem: () => "id" },
+    document,
+    async fetch(url) {
+      calls.push(url);
+      const override = fetchOverride?.(url);
+      if (override) return override;
+      if (fail) return { ok: false, status: 503 };
+      return { ok: true, async json() {
+        if (url.endsWith("/market")) return {
+          schema: invalid ? "invalid" : "idx.market.v1", provider: "fixture", stale: true,
+          fetched_at: "2026-11-18T04:00:00Z", ...marketMeta,
+          data: { index: { price: 7000, change_pct: 1 }, market_open: false,
+            as_of: "2026-11-18T10:00:00+07:00", gainers: [], losers: [], behind_session: true, ...marketData }
+        };
+        return { schema: "idx.quotes.v1", provider: "fixture", stale: false,
+          fetched_at: "2026-11-18T04:00:00Z",
+          data: [{ symbol: "BBCA", name: "Bank Central Asia", price: 123, change_pct: 1, volume: 20 },
+                 { symbol: "BBRI", name: "Bank Rakyat Indonesia", price: 120, change_pct: -2, volume: 40 }] };
+      } };
+    }
+  });
+  return { elements, calls, created: () => created };
+}
+const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test("live API loads automatically, no demo mode, stale metadata is visible", async () => {
+  const { elements, calls } = setup();
+  await tick();
+  assert.deepEqual(calls, [
+    "https://api.example.test/api/market",
+    "https://api.example.test/api/quote?symbols=BBCA%2CBBRI%2CTLKM",
+  ]);
+  assert.match(elements.get("market-notice").textContent, /tertinggal/);
+  assert.match(elements.get("mode").textContent, /tertunda/);
+  assert.equal(elements.get("detail-price").textContent, "Rp123");
+  assert.equal(elements.get("stocks").children.length, 2);
+});
+
+test("filter and sort operate on returned live quotes", async () => {
+  const { elements } = setup();
+  await tick();
+  elements.get("explorer-sort").value = "volume";
+  elements.get("explorer-sort").change({ target: elements.get("explorer-sort") });
+  assert.equal(elements.get("stocks").children[0].children[0].children[0].textContent, "BBRI");
+  elements.get("explorer-search").input({ target: { value: "BBCA" } });
+  assert.equal(elements.get("stocks").children.length, 1);
+});
+
+test("provider errors do not fall back to fabricated sample prices", async () => {
+  const { elements } = setup({ fail: true });
+  await tick();
+  assert.match(elements.get("notice").textContent, /HTTP 503/);
+  assert.equal(elements.get("detail-price").textContent, "—");
+  assert.equal(elements.get("stocks").children.length, 0);
+});
+
+test("API schema mismatch is rejected rather than silently displayed", async () => {
+  const { elements } = setup({ invalid: true });
+  await tick();
+  assert.match(elements.get("market-notice").textContent, /Format respons API tidak sesuai/);
+  assert.equal(elements.get("ihsg").textContent, "—");
+});
+
+test("market insight visualizations use only API breadth and movers", async () => {
+  const { elements } = setup();
+  await tick();
+  assert.equal(elements.get("advancing").textContent, "—");
+  assert.equal(elements.get("gainers-list").children.length, 1);
+  assert.match(elements.get("gainers-list").children[0].textContent, /Data belum tersedia/);
+});
+
+
+test("market remains visible when quote request fails", async () => {
+  const { elements } = setup({
+    fetchOverride: url => url.includes("/quote?") && { ok: false, status: 503 },
+  });
+  await tick();
+  assert.equal(elements.get("ihsg").textContent, "7.000");
+  assert.match(elements.get("notice").textContent, /HTTP 503/);
+  assert.equal(elements.get("detail-price").textContent, "—");
+  assert.equal(elements.get("refresh").attributes["aria-disabled"], "false");
+});
+
+test("an invalid market response leaves watchlist quotes usable", async () => {
+  const { elements } = setup({ invalid: true });
+  await tick();
+  assert.equal(elements.get("ihsg").textContent, "—");
+  assert.equal(elements.get("stocks").children.length, 2);
+  assert.equal(elements.get("detail-price").textContent, "Rp123");
+});
+
+test("market renders while quotes load, and only the latest watchlist request wins", async () => {
+  let resolveOldQuotes;
+  const oldQuotes = new Promise(resolve => { resolveOldQuotes = resolve; });
+  const { elements, calls } = setup({
+    fetchOverride: url => url.endsWith("BBCA%2CBBRI%2CTLKM") && oldQuotes,
+  });
+  await tick();
+  assert.equal(elements.get("ihsg").textContent, "7.000");
+  assert.equal(elements.get("refresh").attributes["aria-disabled"], "true");
+  elements.get("symbol").value = "asii.jk";
+  elements.get("add-stock").submit({ preventDefault() {} });
+  await tick();
+  assert.equal(calls.filter(url => url.endsWith("/market")).length, 1);
+  assert.match(calls.at(-1), /%2CASII$/);
+  assert.match(elements.get("notice").textContent, /Tidak ditemukan: .*ASII/);
+  resolveOldQuotes({ ok: false, status: 503 });
+  await tick();
+  assert.equal(elements.get("stocks").children.length, 2);
+  assert.equal(elements.get("refresh").attributes["aria-disabled"], "false");
+  assert.doesNotMatch(elements.get("notice").textContent, /503/);
+});
+
+
+test("breadth visual and most active values reflect the snapshot payload", async () => {
+  const { elements } = setup({
+    marketData: {
+      advancing: 2, declining: 1, unchanged: 1, quoted: 4, universe: 6,
+      most_active: [{ symbol: "BBCA", value: 18000, volume: 9, price: 2000 },
+                    { symbol: "BBRI", value: null, volume: null, price: 1000 }],
+    },
+  });
+  await tick();
+  assert.match(elements.get("breadth-caption").textContent, /4 dari 6/);
+  assert.equal(elements.get("breadth-track").hidden, false);
+  assert.deepEqual(["up", "down", "flat"].map(key => elements.get("breadth-" + key).style.width), ["50%", "25%", "25%"]);
+  const [first, second] = elements.get("most_active-list").children;
+  assert.equal(first.children[1].children[0], "Rp18.000");
+  assert.equal(first.children[1].children[1].textContent, "9 saham");
+  assert.equal(second.children[1].children[0], "—");
+  assert.equal(second.children[1].children[1].textContent, "—");
+});
+
+test("missing breadth categories leave the distribution hidden", async () => {
+  const { elements } = setup({ marketData: { advancing: 3, declining: null, unchanged: 1 } });
+  await tick();
+  assert.equal(elements.get("breadth-track").hidden, true);
+  assert.equal(elements.get("declining").textContent, "—");
+});
+
+test("cached responses, session closure, and provider lag have distinct labels", async () => {
+  const { elements } = setup({
+    marketMeta: { cached: true, stale: false },
+    marketData: { behind_session: false },
+  });
+  await tick();
+  assert.match(elements.get("market-notice").textContent, /cache/);
+  assert.doesNotMatch(elements.get("market-notice").textContent, /tertinggal|lama/);
+  assert.equal(elements.get("market-status").textContent, "Pasar tutup");
+  assert.match(elements.get("updated").textContent, /Waktu data pasar.*WIB/);
+});
+
+test("contextual retry fetches only the failed panel and shows refresh feedback", async () => {
+  let quoteAttempts = 0;
+  const { elements, calls } = setup({
+    fetchOverride: url => url.includes("/quote?") && ++quoteAttempts === 1 && { ok: false, status: 503 },
+  });
+  await tick();
+  assert.equal(elements.get("retry-quotes").hidden, false);
+  assert.equal(elements.get("retry-market").hidden, true);
+  elements.get("retry-quotes").click();
+  assert.equal(elements.get("refresh-label").textContent, "Memuat data…");
+  assert.equal(elements.get("retry-quotes").hidden, true);
+  await tick();
+  assert.equal(elements.get("refresh-label").textContent, "Perbarui data");
+  assert.equal(elements.get("detail-price").textContent, "Rp123");
+  assert.equal(calls.filter(url => url.endsWith("/market")).length, 1);
+});
+
+test("invalid ticker feedback is attached to its field and triggers no API request", async () => {
+  const { elements, calls } = setup();
+  await tick();
+  const input = elements.get("symbol");
+  input.value = "AAPL.US";
+  elements.get("add-stock").submit({ preventDefault() {} });
+  assert.equal(input.attributes["aria-invalid"], "true");
+  assert.match(elements.get("symbol-feedback").textContent, /ticker IDX yang valid/);
+  assert.equal(calls.length, 2);
+  input.input();
+  assert.equal(input.attributes["aria-invalid"], undefined);
+});
+
+test("selecting a watchlist row preserves keyboard focus and updates its pressed state", async () => {
+  const { elements } = setup();
+  await tick();
+  const stockList = elements.get("stocks");
+  const oldButton = stockList.children[1];
+  oldButton.focus();
+  oldButton.click();
+  const [bbca, bbri] = stockList.children;
+  assert.equal(bbca.attributes["aria-pressed"], "false");
+  assert.equal(bbri.attributes["aria-pressed"], "true");
+  assert.equal(bbri.focused, true);
+  assert.match(elements.get("detail-title").textContent, /^BBRI/);
+});
+
+test("failed refresh retains real snapshots with an explicit warning until retry succeeds", async () => {
+  let failRefresh = false;
+  const { elements } = setup({ fetchOverride: () => failRefresh && { ok: false, status: 503 } });
+  await tick();
+  failRefresh = true;
+  elements.get("refresh").click();
+  await tick();
+  assert.equal(elements.get("ihsg").textContent, "7.000");
+  assert.equal(elements.get("detail-price").textContent, "Rp123");
+  assert.equal(elements.get("mode").textContent, "Snapshot sebelumnya");
+  assert.equal(elements.get("market-status").textContent, "Status sesi belum diperbarui");
+  for (const id of ["market-notice", "notice"]) {
+    assert.match(elements.get(id).textContent, /HTTP 503.*data terakhir.*WIB/);
+  }
+  failRefresh = false;
+  elements.get("retry-market").click();
+  await tick();
+  assert.equal(elements.get("retry-market").hidden, true);
+  assert.equal(elements.get("retry-quotes").hidden, false);
+  assert.doesNotMatch(elements.get("market-notice").textContent, /HTTP 503/);
+});
+
+test("issuer discovery searches by name or ticker and fetches quotes only on add", async () => {
+  const catalog = [{ symbol: "ASII", name: "ASTRA INTERNATIONAL Tbk" }];
+  const { elements, calls } = setup({
+    fetchOverride: url => url.startsWith("./issuer-catalog.json") && { ok: true, json: async () => catalog },
+  });
+  await tick();
+  const form = elements.get("issuer-search");
+  const query = elements.get("issuer-query");
+  query.value = "astra";
+  await form.submit({ preventDefault() {} });
+  const results = elements.get("issuer-results");
+  assert.equal(results.children[0].textContent, "ASII · ASTRA INTERNATIONAL Tbk");
+  assert.equal(calls.length, 3);
+  results.children[0].click();
+  assert.equal(elements.get("symbol").value, "ASII");
+  assert.equal(calls.length, 3);
+  elements.get("add-stock").submit({ preventDefault() {} });
+  await tick();
+  assert.match(calls.at(-1), /%2CASII$/);
+  query.value = "asii.jk";
+  await form.submit({ preventDefault() {} });
+  assert.equal(results.children.length, 1);
+  assert.equal(calls.filter(url => url.startsWith("./issuer-catalog.json")).length, 1);
+});
+
+test("issuer discovery limits results, ignores outdated searches and can retry a failed catalog load", async () => {
+  let attempts = 0;
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const { elements } = setup({ fetchOverride: url => {
+    if (!url.startsWith("./issuer-catalog.json")) return;
+    return ++attempts === 1 ? { ok: false, status: 503 } : pending;
+  } });
+  const form = elements.get("issuer-search");
+  const query = elements.get("issuer-query");
+  query.value = "BANK";
+  await form.submit({ preventDefault() {} });
+  assert.match(elements.get("issuer-status").textContent, /tidak tersedia/);
+  const old = form.submit({ preventDefault() {} });
+  query.value = "BK9";
+  query.input();
+  const current = form.submit({ preventDefault() {} });
+  const rows = Array.from({ length: 10 }, (_, i) => ({ symbol: "BK" + i, name: "BANK " + i }));
+  finish({ ok: true, json: async () => rows });
+  await Promise.all([old, current]);
+  assert.equal(elements.get("issuer-results").children.length, 1);
+  assert.match(elements.get("issuer-results").children[0].textContent, /^BK9/);
+  query.value = "BANK";
+  await form.submit({ preventDefault() {} });
+  assert.equal(elements.get("issuer-results").children.length, 8);
+  assert.match(elements.get("issuer-status").textContent, /8 dari 10/);
+});
+
+test("history loads on demand and only displays points for the latest requested range", async () => {
+  let finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const history = (range, points) => ({ ok: true, json: async () => ({
+    schema: "idx.daily-history.v1", provider: "fixture", stale: true,
+    data: { symbol: "BBCA", range, points },
+  }) });
+  const point = { date: "2026-11-18", close: 123, volume: null };
+  const { elements, calls } = setup({ fetchOverride: url => {
+    if (!url.includes("/history?")) return;
+    return url.endsWith("range=1mo") ? pending : history("3y", [point]);
+  } });
+  await tick();
+  assert.equal(calls.length, 2);
+  const panel = elements.get("history-panel"), range = elements.get("history-range");
+  panel.open = true;
+  range.value = "1mo";
+  const old = panel.toggle();
+  range.value = "3y";
+  await range.change();
+  assert.match(calls.at(-1), /symbol=BBCA&range=3y$/);
+  assert.equal(elements.get("history-data").hidden, false);
+  assert.equal(elements.get("history-rows").children.length, 0);
+  elements.get("history-records").open = true;
+  elements.get("history-records").toggle();
+  assert.equal(elements.get("history-rows").children[0].children[3].textContent, "—");
+  assert.match(elements.get("history-status").textContent, /Data lama/);
+  finish(history("1mo", []));
+  await old;
+  assert.equal(elements.get("history-data").hidden, false);
+});
+
+test("history failure offers retry independently of live quote data", async () => {
+  let attempts = 0;
+  const { elements } = setup({ fetchOverride: url => {
+    if (!url.includes("/history?")) return;
+    if (++attempts === 1) return { ok: false, status: 503 };
+    return { ok: true, json: async () => ({
+      schema: "idx.daily-history.v1", data: { symbol: "BBCA", range: "ytd", points: [] },
+    }) };
+  } });
+  await tick();
+  const panel = elements.get("history-panel");
+  panel.open = true;
+  elements.get("history-range").value = "ytd";
+  await panel.toggle();
+  assert.equal(elements.get("history-retry").hidden, false);
+  assert.equal(elements.get("detail-price").textContent, "Rp123");
+  elements.get("history-retry").click();
+  await tick();
+  assert.match(elements.get("history-status").textContent, /Belum ada data historis/);
+  assert.equal(elements.get("history-retry").hidden, true);
+});
+
+test("language switch relabels loaded market data and errors without new provider calls", async () => {
+  const { elements, calls } = setup({ invalid: true });
+  await tick();
+  const language = elements.get("dashboard-language");
+  language.change({ target: { value: "en" } });
+  assert.match(elements.get("market-notice").textContent, /Unexpected API response format/);
+  assert.equal(elements.get("detail-title").textContent, "BBCA · Stock details");
+  assert.equal(elements.get("refresh-label").textContent, "Refresh data");
+  assert.match(elements.get("notice").textContent, /Response received.*WIB/);
+  assert.equal(calls.length, 2);
+  language.change({ target: { value: "id" } });
+  assert.match(elements.get("market-notice").textContent, /Format respons API tidak sesuai/);
+  assert.equal(elements.get("detail-title").textContent, "BBCA · Detail saham");
+  assert.equal(calls.length, 2);
+});
+
+test("history rejects invalid calendar dates and labels unknown currency without rupiah", async () => {
+  let pointDate = "2026-02-30";
+  const { elements } = setup({ fetchOverride: url => url.includes("/history?") && {
+    ok: true, json: async () => ({
+      schema: "idx.daily-history.v1",
+      data: { symbol: "BBCA", range: "3w", currency: null, points: [
+        { date: pointDate, close: 123, volume: null, adjusted_close: null, provisional: true },
+      ] },
+    }),
+  } });
+  const panel = elements.get("history-panel");
+  panel.open = true;
+  elements.get("history-range").value = "3w";
+  await panel.toggle();
+  assert.equal(elements.get("history-retry").hidden, false);
+  pointDate = "2026-02-27";
+  elements.get("history-retry").click();
+  await tick();
+  assert.equal(elements.get("history-data").hidden, false);
+  assert.match(elements.get("history-currency").textContent, /tidak dilaporkan/);
+  assert.doesNotMatch(elements.get("history-price-range").textContent, /Rp/);
+  assert.match(elements.get("history-point").attributes["aria-valuetext"], /Sementara/);
+});
+
+test("filter and sort rerender only the watchlist, without rebuilding market lists or fetching", async () => {
+  const { elements, calls, created } = setup();
+  await tick();
+  const keys = ["gainers-list", "losers-list", "most_active-list"];
+  const marketCounts = keys.map(key => elements.get(key).replacements);
+  const stockCount = elements.get("stocks").replacements;
+  const nodes = created();
+  elements.get("explorer-search").input({ target: { value: "BBCA" } });
+  assert.deepEqual(keys.map(key => elements.get(key).replacements), marketCounts);
+  assert.equal(elements.get("stocks").replacements, stockCount + 1);
+  assert.equal(created() - nodes, 7);
+  elements.get("explorer-sort").change({ target: { value: "volume" } });
+  assert.deepEqual(keys.map(key => elements.get(key).replacements), marketCounts);
+  assert.equal(calls.length, 2);
+});
+
+test("712-record history builds no table nodes until expanded and only rebuilds on data or locale change", async () => {
+  const points = Array.from({ length: 712 }, (_, i) => ({
+    date: new Date(Date.UTC(2023, 0, i + 1)).toISOString().slice(0, 10),
+    close: 100 + i, volume: 1000, adjusted_close: 100 + i,
+  }));
+  const { elements, calls, created } = setup({
+    fetchOverride: url => url.includes("/history?") && {
+      ok: true,
+      json: async () => ({ schema: "idx.daily-history.v1", data: { symbol: "BBCA", range: "3y", currency: "IDR", points } }),
+    },
+  });
+  await tick();
+  const before = created();
+  elements.get("history-panel").open = true;
+  elements.get("history-range").value = "3y";
+  await elements.get("history-panel").toggle();
+  assert.equal(created(), before);
+  const table = elements.get("history-rows");
+  assert.equal(table.children.length, 0);
+  const details = elements.get("history-records");
+  details.open = true;
+  details.toggle();
+  assert.equal(table.children.length, 712);
+  assert.equal(created() - before, 3560);
+  assert.equal(table.children[0].children[0].textContent, points.at(-1).date);
+  details.open = false;
+  details.toggle();
+  details.open = true;
+  details.toggle();
+  assert.equal(created() - before, 3560);
+  assert.equal(calls.length, 3);
+  elements.get("dashboard-language").change({ target: { value: "en" } });
+  assert.equal(table.children[0].children[3].textContent, "1,000");
+  assert.equal(calls.length, 3);
+});
