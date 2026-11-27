@@ -24,7 +24,7 @@ jobs:
   build:
     name: ${{ matrix.target }}
     # Skipped with it: the release and crates.io, which need it.
-    if: ${{ !inputs.npm_only }}
+    if: ${{ github.repository == 'fzn0x/idx' && !inputs.npm_only }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -161,7 +161,7 @@ jobs:
     # configure crates.io Trusted Publishing for this workflow (no secret).
     needs: release
     runs-on: ubuntu-latest
-    if: ${{ vars.CRATES_PUBLISH == 'true' }}
+    if: ${{ github.repository == 'fzn0x/idx' && vars.CRATES_PUBLISH == 'true' }}
     permissions:
       contents: read
       id-token: write
@@ -202,7 +202,7 @@ jobs:
     # without rebuilding (and so changing) the release's binaries.
     needs: release
     runs-on: ubuntu-latest
-    if: ${{ !cancelled() && vars.NPM_PUBLISH == 'true' && (inputs.npm_only || needs.release.result == 'success') }}
+    if: ${{ github.repository == 'fzn0x/idx' && !cancelled() && vars.NPM_PUBLISH == 'true' && (inputs.npm_only || needs.release.result == 'success') }}
     strategy:
       fail-fast: false
       matrix:

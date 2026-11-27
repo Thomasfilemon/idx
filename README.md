@@ -1,3 +1,57 @@
+# Thomas IDX Lab
+
+An Indonesian stock market analytics platform for exploring IHSG market breadth, quoted stocks, daily OHLCV history and technical indicators. Data is sourced from providers and can be delayed, partial or stale. The interface defaults to English and remembers the visitor’s ID / EN selection.
+
+[Open the platform](https://thomasfilemon.github.io/idx/) · [Market Overview](https://thomasfilemon.github.io/idx/market.html) · [Stock Explorer — BBCA](https://thomasfilemon.github.io/idx/stock.html?symbol=BBCA&range=3mo) · [REST API documentation](https://github.com/Thomasfilemon/idx/blob/development/docs/thomas-lab.md)
+
+<p align="center">
+  <img src="docs/screenshots/thomas-stock.webp" alt="Actual BBCA daily price and volume chart in Stock Explorer" width="850">
+</p>
+
+### From market snapshot to individual stock
+
+Market Overview shows the benchmark, snapshot coverage, gainers, losers and activity. When missing market caps leave a movers list empty, it ranks traded stocks from the same snapshot and labels the fallback. Stock Explorer supports issuer search, a session watchlist, shareable ticker/range links and six history windows from three weeks to three years. Candlesticks require genuine OHLC values. A valid close supports a line chart when OHLC is incomplete.
+
+<p align="center">
+  <img src="docs/screenshots/thomas-market.webp" alt="Actual market breadth and movers snapshot" width="700">
+</p>
+
+These captures show provider data returned on 27 November 2026. Open the demo for the latest available snapshot.
+
+### Architecture and data
+
+GitHub Pages serves static HTML, shared CSS and native JavaScript modules. The browser calls an Axum REST service on Render. Existing Rust providers and caches supply market and price observations. The service validates symbols, normalizes WIB session dates, removes duplicate bars, checks OHLC relationships, and returns data with source and freshness metadata. Charts use a pinned, self-hosted TradingView Lightweight Charts module loaded when chart data is available.
+
+Indicators use the provider close on eligible, completed trading sessions. Five years of daily source history are requested for warm-up. Results are calculated before cropping to the visual range. SMA20/50/200 and EMA20 require 20/50/200 and 20 observations respectively. Wilder RSI14 requires 15 closes and returns 100 on a flat series. MACD(12,26,9) starts at 35 observations for CLI/MCP compatibility. Missing sessions reset the window. The verified calendar covers 2026–2027. Prices outside those years remain visible without indicator values.
+
+### Local setup and checks
+
+From the repository root, run the following in separate terminals. The container exposes the API on port 8000.
+
+```sh
+docker build -t thomas-idx-api .
+docker run --rm -p 127.0.0.1:8000:8000 thomas-idx-api
+```
+
+```sh
+curl -fsS http://127.0.0.1:8000/healthz
+curl -fsS 'http://127.0.0.1:8000/api/history?symbol=BBCA&range=3mo&indicators=true'
+cargo test --locked --all-targets
+node --test web/test/*.mjs npm/test/*.mjs
+python web/test/dashboard-browser.py --chrome /path/to/chrome --screenshots /tmp/idx-smoke
+```
+
+Browser tests require Python Playwright and Chrome. They use controlled responses for failure, stale and empty states. CI also checks lint, the container, and Rust on Linux, macOS and Windows. The free Render service can sleep between visits. Loading, retry and timestamp labels distinguish an unavailable service from an empty dataset.
+
+### Project scope and attribution
+
+Thomas IDX Lab extends the MIT-licensed [fzn0x/idx project](https://github.com/fzn0x/idx). The upstream project supplies the provider integrations, Rust CLI, MCP and analytical foundations. Fork contributions include the independent REST service and its public contracts, a bilingual multi-page interface, historical data quality handling, market mover fallback, chart integration, session-aware indicator series, deployment and browser regression tests. TradingView attribution and license files accompany the vendored chart. See [LICENSE](LICENSE).
+
+RC1 freezes feature development while the deployment branch and operational checks are reviewed. [Release notes, production cutover and rollback](https://github.com/Thomasfilemon/idx/blob/development/docs/assessments/rc1.md).
+
+<details>
+<summary>Upstream CLI and terminal reference, including the historical fork status recorded on 24 November 2026</summary>
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
@@ -12,24 +66,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml/badge.svg?branch=development"></a>
+  <a href="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Thomasfilemon/idx/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-16a34a.svg"></a>
-  <a href="https://thomasfilemon.github.io/idx/"><img alt="Experimental dashboard" src="https://img.shields.io/badge/dashboard-GitHub_Pages-123a64.svg"></a>
+  <a href="https://ihsg.midoriresearch.com"><img alt="Web terminal" src="https://img.shields.io/badge/web-ihsg.midoriresearch.com-123a64.svg"></a>
 </p>
 
 ---
 
-## Thomas IDX Lab
-
-> **Branch status.** The default branch (`main`) is behind [`development`](https://github.com/Thomasfilemon/idx/tree/development), which contains the latest Thomas IDX Lab changes.
-
-Thomas IDX Lab is an independent learning fork of [fzn0x/idx](https://github.com/fzn0x/idx). The [GitHub Pages dashboard](https://thomasfilemon.github.io/idx/) uses the [standalone Rust/Axum API](https://idx-api-1bd1.onrender.com/healthz) hosted on Render. It shows the IHSG snapshot, market breadth, movers, and watchlist quotes from the API. Provider data can be delayed or incomplete.
-
-- `GET /healthz` checks API liveness.
-- `GET /api/market` returns the market snapshot and freshness metadata.
-- `GET /api/quote?symbols=BBCA,BBRI` returns quotes for the requested tickers.
-
-See the [deployment notes](docs/thomas-lab.md) for local setup and API details. The CLI examples, web terminal screenshots, package links, and hosted tooling below refer to the upstream project.
+> **Thomas IDX Lab branch status.** The default branch (`main`) is behind [`development`](https://github.com/Thomasfilemon/idx/tree/development), which contains the latest Thomas IDX Lab changes. The standalone Rust API and [Thomas IDX Lab dashboard](https://thomasfilemon.github.io/idx/) are maintained on `development`. The CLI, screenshots, and service links below describe the [upstream IDX project](https://github.com/fzn0x/idx).
 
 ---
 
@@ -537,3 +581,5 @@ Architecture, conventions and "how to add a provider" live in
 ## License
 
 [MIT](LICENSE)
+
+</details>

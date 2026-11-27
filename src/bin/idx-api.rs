@@ -9,7 +9,7 @@ use axum::{
     extract::{rejection::QueryRejection, Query, Request, State},
     http::{header, HeaderValue, StatusCode},
     middleware::{self, Next},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::get,
     Json, Router,
 };
@@ -498,12 +498,61 @@ async fn cors(State(origins): State<Arc<[HeaderValue]>>, req: Request, next: Nex
     response
 }
 
+/// Shared per-process budget. Forwarded client addresses are deliberately not trusted.
+struct ApiBudget {
+    window: Mutex<(Instant, u32)>,
+    active: Semaphore,
+}
+
+const REQUESTS_PER_MINUTE: u32 = 120;
+async fn limit_api(State(budget): State<Arc<ApiBudget>>, req: Request, next: Next) -> Response {
+    if req.uri().query().is_some_and(|q| q.len() > 2048) {
+        return error(
+            StatusCode::URI_TOO_LONG,
+            "query_too_long",
+            "Query exceeds 2048 bytes.",
+        )
+        .into_response();
+    }
+    {
+        let mut window = budget.window.lock().await;
+        let elapsed = window.0.elapsed().as_secs();
+        if elapsed >= 60 {
+            *window = (Instant::now(), 0);
+        }
+        if window.1 >= REQUESTS_PER_MINUTE {
+            let mut response = error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limited",
+                "Retry after the current request window.",
+            )
+            .into_response();
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(60 - elapsed));
+            return response;
+        }
+        window.1 += 1;
+    }
+    let Ok(_slot) = budget.active.try_acquire() else {
+        return unavailable().into_response();
+    };
+    next.run(req).await
+}
+
 fn router(provider: Arc<dyn Provider>, universe: Vec<Issuer>, origins: Vec<HeaderValue>) -> Router {
     Router::new()
-        .route("/healthz", get(health))
         .route("/api/quote", get(quote))
         .route("/api/market", get(market))
         .route("/api/history", get(history))
+        .route_layer(middleware::from_fn_with_state(
+            Arc::new(ApiBudget {
+                window: Mutex::new((Instant::now(), 0)),
+                active: Semaphore::new(12),
+            }),
+            limit_api,
+        ))
+        .route("/healthz", get(health))
         .with_state(AppState {
             provider,
             universe: universe.into(),
@@ -1016,6 +1065,35 @@ mod tests {
         let status = response.status();
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn public_budget_limits_api_requests_and_keeps_liveness_available() {
+        let app = router(Arc::new(OfflineProvider), one_issuer(), vec![]);
+        let oversized = "/api/history?".to_string() + &"a".repeat(2049);
+        assert_eq!(
+            request(app.clone(), &oversized).await.0,
+            StatusCode::URI_TOO_LONG
+        );
+        for _ in 0..REQUESTS_PER_MINUTE {
+            assert_eq!(
+                request(app.clone(), "/api/quote").await.0,
+                StatusCode::BAD_REQUEST
+            );
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/market")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(response.headers().contains_key(header::RETRY_AFTER));
+        assert_eq!(request(app, "/healthz").await.0, StatusCode::OK);
     }
 
     #[tokio::test]

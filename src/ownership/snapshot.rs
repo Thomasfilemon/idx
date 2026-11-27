@@ -1095,7 +1095,7 @@ fn swap_in(src: &Path, db_path: &Path, backup_to: Option<&Path>) -> Result<()> {
         for suffix in ["-journal", "-wal", "-shm"] {
             let _ = std::fs::remove_file(sidecar(bak, suffix));
         }
-        dest.backup(rusqlite::MAIN_DB, bak, None).map_err(|e| {
+        dest.backup(rusqlite::MAIN_DB, bak, None::<fn(rusqlite::backup::Progress)>).map_err(|e| {
             IdxError::Other(format!(
                 "could not copy the ownership database to {} before replacing it ({e}); nothing was changed",
                 bak.display()

@@ -1,8 +1,8 @@
 export function createI18n(document, storage, formatting) {
   const $ = id => document.getElementById(id);
-  let language = "id";
+  let language = "en";
   try {
-    if (storage?.getItem("idx-language") === "en") language = "en";
+    if (storage?.getItem("idx-language") === "id") language = "id";
   } catch {
     // Language remains usable when browser storage is unavailable.
   }

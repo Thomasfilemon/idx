@@ -89,9 +89,12 @@ return 504 `timeout`. Internal/configuration errors during requests return 500
 The API allows four concurrent quote calls and one full market refresh. It
 reuses the provider cache and holds the assembled market result for 60 seconds,
 or a refresh error for five seconds. Each provider operation has a 25-second
-API deadline, in addition to the existing network timeout. Before public
-exposure, configure reverse proxy rate limits that return 429, including a
-global request cap and stricter limits for the market route. Use HTTPS and set
+API deadline, in addition to the existing network timeout. The single instance shares a 120-request/60-second fixed window across API callers.
+Exhaustion returns 429 with Retry-After. Up to 12 API calls are admitted at once,
+including market waiters. History allows two concurrent provider calls.
+Query strings longer than 2048 bytes receive 414. Health is independent of these budgets.
+The browser deadline is 90 seconds to accommodate a sleeping free instance.
+Use HTTPS and set
 `IDX_API_CORS_ORIGINS=https://thomasfilemon.github.io` for Pages.
 
 ### Dashboard and container

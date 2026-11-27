@@ -169,7 +169,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
         try {
           response = await api.get(path + "&indicators=true", request.signal);
         } catch (error) {
-          if (request.signal.aborted) throw error;
+          if (request.signal.aborted || ![400, 404, 502, 503].includes(error.status)) throw error;
           // Older API releases and providers without five-year history can still serve prices.
           response = await api.get(path, request.signal);
         }

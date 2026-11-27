@@ -1,9 +1,9 @@
-name: Deploy IDX Dashboard Preview
+name: Deploy IDX Dashboard
 
 on:
   workflow_dispatch:
   push:
-    branches: [development]
+    branches: [development, main]
     paths:
       - 'web/public/dashboard.html'
       - 'web/public/dashboard.css'
@@ -26,13 +26,15 @@ concurrency:
 
 jobs:
   deploy:
-    name: Publish mobile dashboard
+    # Until cutover, only development may publish to the single Pages site.
+    if: github.ref_name == (vars.PAGES_DEPLOY_BRANCH || 'development')
+    name: Publish dashboard
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout development
+      - name: Checkout selected branch
         uses: actions/checkout@v4
       - name: Prepare static site
         shell: bash
@@ -49,7 +51,7 @@ jobs:
           python3 web/scripts/issuer-catalog.py > _site/issuer-catalog.json
           touch _site/.nojekyll
           test -s _site/index.html
-          grep -q 'Market data.' _site/index.html
+          grep -q 'market analytics' _site/index.html
           test -s _site/dashboard.css
           test -s _site/dashboard.js
           grep -q 'href="./dashboard.css"' _site/index.html

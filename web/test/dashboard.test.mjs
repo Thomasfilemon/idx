@@ -24,6 +24,7 @@ function setup({ fail = false, invalid = false, fetchOverride, marketData = {}, 
     },
   };
   initDashboard({
+    storage: { getItem: () => "id" },
     document,
     async fetch(url) {
       calls.push(url);

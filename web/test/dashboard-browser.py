@@ -111,6 +111,8 @@ def smoke(browser, name, width, screenshots):
 
     page.route("**/*", serve)
     page.goto(f"{SITE}/#dashboard")
+    expect(page.locator("html")).to_have_attribute("lang", "en")
+    page.get_by_role("combobox", name="Language").select_option("id")
     expect(page.locator("#quoted")).to_have_text("911")
     expect(page.get_by_text("Pasar tutup")).to_be_visible()
     expect(page.locator("#gainers-list")).to_contain_text("ASII")

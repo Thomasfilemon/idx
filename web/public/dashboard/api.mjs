@@ -2,13 +2,13 @@ export function createApi(document, fetchImpl) {
   const apiBase = document.querySelector('meta[name="idx-api-base"]')?.content.trim().replace(/\/+$/, "") || "";
   async function get(path, signal, base = apiBase) {
     const timeout = new AbortController();
-    const timer = setTimeout(() => timeout.abort(), 55000);
+    const timer = setTimeout(() => timeout.abort(), 90000);
     const abort = () => timeout.abort();
     if (signal?.aborted) abort();
     else signal?.addEventListener("abort", abort, { once: true });
     try {
       const response = await fetchImpl(base + path, { signal: timeout.signal, headers: { Accept: "application/json" } });
-      if (!response.ok) throw Error("HTTP " + response.status);
+      if (!response.ok) throw Object.assign(Error("HTTP " + response.status), { status: response.status });
       const body = await response.json();
       if (body?.error) throw Error(body.error.message || "API error");
       return body;
