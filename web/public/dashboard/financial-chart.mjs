@@ -70,11 +70,33 @@ export function createFinancialChart(host, points, mode, locale, onInspect, onOl
     const gesture = new AbortController();
     let interacted = false;
     if (onOlder) {
-      for (const event of ["pointerdown", "wheel", "touchstart"]) {
-        host.addEventListener(event, () => { interacted = true; }, { passive: true, signal: gesture.signal });
+      const options = { passive: true, capture: true, signal: gesture.signal };
+      const atStart = range => range && range.from < 8;
+      let drag;
+      host.addEventListener("pointerdown", event => {
+        if (!event.isPrimary) return;
+        interacted = true;
+        drag = { id: event.pointerId, x: event.clientX, y: event.clientY, requested: false };
+      }, options);
+      host.addEventListener("pointermove", event => {
+        if (!drag || drag.id !== event.pointerId || drag.requested) return;
+        const dx = event.clientX - drag.x;
+        const dy = event.clientY - drag.y;
+        // Short series may already be clamped at their first bar. A deliberate
+        // backward pan still needs to load older data even without a scale event.
+        if (dx > 24 && dx > Math.abs(dy) && atStart(chart.timeScale().getVisibleLogicalRange())) {
+          drag.requested = true;
+          onOlder();
+        }
+      }, options);
+      for (const event of ["pointerup", "pointercancel", "pointerleave"]) {
+        host.addEventListener(event, () => { drag = undefined; }, options);
+      }
+      for (const event of ["wheel", "touchstart"]) {
+        host.addEventListener(event, () => { interacted = true; }, options);
       }
       chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        if (interacted && range && range.from < 8) onOlder();
+        if (interacted && atStart(range)) onOlder();
       });
     }
     return {
