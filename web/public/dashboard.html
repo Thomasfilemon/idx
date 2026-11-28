@@ -158,7 +158,13 @@
                   <label for="history-style" data-en="Price chart">Grafik harga</label>
                   <select id="history-style"><option value="candlestick">Candlestick</option><option value="line" data-en="Line">Garis</option></select>
                   <p id="history-chart-status" class="notice" role="status"></p>
-                  <div id="financial-chart" hidden></div>
+                  <div class="financial-chart-frame">
+                    <div id="financial-chart" hidden></div>
+                    <div id="history-page-loading" class="history-page-loading" role="status" hidden>
+                      <span class="history-page-spinner" aria-hidden="true"></span>
+                      <span data-en="Loading earlier history…">Memuat histori sebelumnya…</span>
+                    </div>
+                  </div>
                   <button id="history-older" type="button" class="action-button" data-en="Load earlier history" hidden>Muat histori sebelumnya</button>
 <!-- pages stock -->
                   <fieldset id="indicator-controls"><legend data-en="Technical indicators">Indikator teknikal</legend>

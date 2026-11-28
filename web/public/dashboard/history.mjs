@@ -31,10 +31,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     host.hidden = true;
     $("history-data").classList.remove("interactive");
   }
-  async function drawChart(visibleRange) {
-    clearChart();
-    const version = chartVersion;
-    const { points } = historyData;
+  function chartMode(points) {
     const available = points.every(completeOhlc);
     const mode = available ? preferredMode : "line";
     const selector = $("history-style");
@@ -44,6 +41,14 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     setLocalizedMessage(status, () => available ? "" : tr(
       "OHLC belum lengkap. Grafik garis memakai harga penutupan.",
       "OHLC is incomplete. The line chart uses closing prices."));
+    return mode;
+  }
+  async function drawChart(visibleRange) {
+    clearChart();
+    const version = chartVersion;
+    const { points } = historyData;
+    const mode = chartMode(points);
+    const status = $("history-chart-status");
     try {
       const { createFinancialChart } = await import("./financial-chart.mjs");
       if (chartVersion !== version) return;
@@ -148,6 +153,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     if (document.body?.dataset?.page !== "stock" && !$("history-panel").open) {
       historyRequest?.abort();
       historyRequest = undefined;
+      if ($("history-page-loading")) $("history-page-loading").hidden = true;
       if ($("history-loading")) $("history-loading").hidden = true;
       historyKey = "";
       return;
@@ -160,6 +166,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     historyKey = key;
     olderLoading = false;
     olderFailed = false;
+    if ($("history-page-loading")) $("history-page-loading").hidden = true;
     if ($("history-older")) { $("history-older").hidden = true; $("history-older").disabled = false; }
     historyRequest?.abort();
     const request = new AbortController();
@@ -225,6 +232,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     olderFailed = false;
     const button = $("history-older");
     button.disabled = true;
+    if ($("history-page-loading")) $("history-page-loading").hidden = false;
     setLocalizedMessage(button, () => tr("Memuat histori sebelumnya…", "Loading earlier history…"));
     try {
       const params = new URLSearchParams({ symbol: current.symbol, range: current.range, before: current.next_before, indicators: String(Boolean(current.calculation)) });
@@ -236,7 +244,6 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       }
       if (data.currency !== current.currency || (data.next_before && data.next_before >= current.next_before) ||
           data.points.some(p => p.date >= current.points[0].date)) throw Error("Inconsistent history page");
-      const visible = chart?.visibleRange();
       const points = [...data.points, ...current.points];
       historyData = { ...current, points, next_before: data.next_before };
       geometry = historyGeometry(points);
@@ -244,7 +251,10 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       $("history-volume-path").setAttribute("d", geometry.volumePath);
       $("history-point").value = String(Number($("history-point").value) + data.points.length);
       renderLabels(historyData);
-      if (data.points.length) drawChart(visible);
+      if (data.points.length) {
+        if (chart) chart.prependPoints(points, chartMode(points));
+        else if (document.defaultView) drawChart();
+      }
       button.hidden = !data.next_before;
     } catch {
       if (request !== historyRequest) return;
@@ -252,6 +262,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     } finally {
       if (request === historyRequest) {
         olderLoading = false;
+        if ($("history-page-loading")) $("history-page-loading").hidden = true;
         button.disabled = false;
         setLocalizedMessage(button, () => olderFailed ? tr("Coba lagi histori lama (perbarui jika gagal)", "Retry earlier history (refresh if it fails)") : tr("Muat histori sebelumnya", "Load earlier history"));
       }
