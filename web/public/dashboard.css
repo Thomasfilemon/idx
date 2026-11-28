@@ -141,7 +141,7 @@
     display: inline-block; margin: 0 .5rem .4rem 0;
   }
   [data-page="stock"] #history-data:not([hidden]) { display: flex; flex-direction: column; align-items: stretch; }
-  [data-page="stock"] #financial-chart { order: -1; margin-bottom: 12px; }
+  [data-page="stock"] .financial-chart-frame { order: -1; margin-bottom: 12px; }
   [data-page="stock"] #history-style { align-self: flex-start; }
 }
 
@@ -168,4 +168,35 @@
 @keyframes skeleton-pulse { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) {
   [data-loading="true"], .history-skeleton { animation: none; }
+}
+
+.financial-chart-frame { position: relative; min-width: 0; }
+.history-page-loading:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: absolute;
+  z-index: 3;
+  top: 10px;
+  left: 10px;
+  padding: 7px 10px;
+  color: #edf0f4;
+  background: #172333;
+  border: 1px solid #526478;
+  border-radius: 8px;
+  font-size: 12px;
+  pointer-events: none;
+}
+.history-page-spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 2px solid #526478;
+  border-top-color: #a6ef79;
+  border-radius: 50%;
+  animation: history-page-spin .8s linear infinite;
+}
+@keyframes history-page-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .history-page-spinner { animation: none; border-color: #a6ef79; }
 }

@@ -53,6 +53,7 @@ def smoke(browser, name, width, screenshots):
     page.on("pageerror", lambda error: errors.append(str(error)))
     market_requests = 0
     quote_requests = 0
+    older_responses = []
 
     def serve(route):
         nonlocal market_requests, quote_requests
@@ -87,16 +88,21 @@ def smoke(browser, name, width, screenshots):
                                        "close": 3750, "volume": 1200} for day in days]}
                 if not older:
                     payload["next_before"] = "2021-11-21"
-                route.fulfill(headers=cors, json={"schema": "idx.daily-history.v1", **OPTIONS, "data": payload})
+                response = {"schema": "idx.daily-history.v1", **OPTIONS, "data": payload}
+                if older:
+                    older_responses.append((route, cors, response))
+                else:
+                    route.fulfill(headers=cors, json=response)
                 return
             if range_code == "3w" and "before" in params:
                 assert params["before"] == ["2026-11-19"]
                 assert params["indicators"] == ["true"]
-                route.fulfill(headers=cors, json={"schema": "idx.daily-history.v1", **OPTIONS,
+                response = {"schema": "idx.daily-history.v1", **OPTIONS,
                     "data": {"symbol": symbol, "range": "3w", "currency": "IDR",
                              "calculation": {"method": "idx.technical.v2", "basis": "close"},
                              "points": [{"date": "2026-10-01", "close": 3500, "volume": 1000,
-                                         "indicators": {"observations": 214, "sma20": 3500, "ema20": 3500}}]}})
+                                         "indicators": {"observations": 214, "sma20": 3500, "ema20": 3500}}]}}
+                older_responses.append((route, cors, response))
                 return
             ohl = {"open": 3700, "high": 3800, "low": 3650} if range_code == "3mo" else {}
             calculation = {"calculation": {"method": "idx.technical.v2", "basis": "close"}} if "indicators" in params else {}
@@ -271,6 +277,12 @@ def smoke(browser, name, width, screenshots):
     period.select_option("3w")
     expect(page.locator("#history-older")).to_be_visible()
     expect(page.locator("#history-dates")).to_contain_text("2026-11-19")
+    canvas = page.locator("#financial-chart canvas").first
+    expect(canvas).to_be_visible()
+    original_canvas = canvas.element_handle()
+    original_chart = page.locator("#financial-chart").bounding_box()
+    loading = page.locator("#history-page-loading")
+    expect(loading).to_be_hidden()
     if mobile:
         page.locator("#history-older").click()
     else:
@@ -282,7 +294,15 @@ def smoke(browser, name, width, screenshots):
         page.mouse.down()
         page.mouse.move(rect["x"] + rect["width"] * 0.75, rect["y"] + rect["height"] * 0.5, steps=12)
         page.mouse.up()
+    expect(loading).to_be_visible()
+    assert original_canvas.evaluate("(el) => el.isConnected")
+    expect(page.locator("#history-older")).to_be_disabled()
+    route, cors, response = older_responses.pop(0)
+    route.fulfill(headers=cors, json=response)
     expect(page.locator("#history-dates")).to_contain_text("2026-10-01")
+    expect(loading).to_be_hidden()
+    assert original_canvas.evaluate("(el) => el.isConnected")
+    assert page.locator("#financial-chart").bounding_box()["height"] == original_chart["height"]
     expect(page.locator("#history-older")).to_be_hidden()
     expect(period).to_have_value("3w")
     assert "range=3w" in page.url
@@ -293,8 +313,18 @@ def smoke(browser, name, width, screenshots):
     page.locator("#history-style").select_option("candlestick")
     expect(page.locator("#history-style")).to_have_value("candlestick")
     expect(page.locator("#history-older")).to_be_visible()
+    canvas = page.locator("#financial-chart canvas").first
+    expect(canvas).to_be_visible()
+    original_canvas = canvas.element_handle()
     page.locator("#history-older").click()
+    expect(loading).to_be_visible()
+    assert original_canvas.evaluate("(el) => el.isConnected")
+    route, cors, response = older_responses.pop(0)
+    route.fulfill(headers=cors, json=response)
     expect(page.locator("#history-dates")).to_contain_text("2016-11-21")
+    expect(loading).to_be_hidden()
+    assert original_canvas.evaluate("(el) => el.isConnected")
+    assert not older_responses
     expect(page.locator("#history-older")).to_be_hidden()
     period.select_option("3mo")
     page.locator("#symbol").fill("BBCA")
