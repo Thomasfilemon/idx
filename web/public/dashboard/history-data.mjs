@@ -8,6 +8,7 @@ export function calendarDay(value) {
 export function validHistory(data, symbol, range) {
   return data?.symbol === symbol && data.range === range && Array.isArray(data.points)
     && (data.currency == null || (typeof data.currency === "string" && /^[A-Z]{3}$/.test(data.currency)))
+    && (data.next_before == null || calendarDay(data.next_before) !== null)
     && data.points.length <= 1100 && data.points.every((point, i, list) =>
       calendarDay(point?.date) !== null && (!i || list[i - 1].date < point.date)
       && Number.isFinite(point.close) && point.close > 0

@@ -231,9 +231,6 @@ async fn history(
         .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).expect("WIB"))
         .date_naive();
     let weekly = query.range == "all";
-    if query.before.is_some() && !weekly {
-        return Err(invalid());
-    }
     let end = query.before.unwrap_or_else(|| today + chrono::Days::new(1));
     if end > today + chrono::Days::new(1) || end.year() < 1900 {
         return Err(invalid());
@@ -252,11 +249,9 @@ async fn history(
     } else {
         Interval::Day1
     };
-    let period = if query.indicators && !weekly {
-        Period::Y5
-    } else {
-        period
-    };
+    // The visual range is independent of the provider history used for warm-up.
+    let full_history = weekly || query.indicators || query.before.is_some();
+    let period = if full_history { Period::Max } else { period };
     let _slot = state
         .history_slots
         .try_acquire()
@@ -274,19 +269,12 @@ async fn history(
         .with_timezone(&idx::model::wib())
         .date_naive()
         .min(today);
-    let window_start = as_of
-        .checked_sub_months(Months::new(60))
-        .ok_or_else(unavailable)?;
-    let window_start = if weekly {
-        NaiveDate::from_ymd_opt(1900, 1, 1).expect("valid date")
-    } else {
-        window_start
-    };
+    let window_start = NaiveDate::from_ymd_opt(1900, 1, 1).expect("valid date");
     let calculation = query.indicators.then(|| Calculation {
         method: if weekly {
             "idx.technical.weekly.v1"
         } else {
-            "idx.technical.v1"
+            "idx.technical.v2"
         },
         basis: "close",
         window_start,
@@ -297,11 +285,7 @@ async fn history(
         let mut points = daily_points(
             history.candles,
             history.close_only,
-            if weekly {
-                window_start
-            } else {
-                calculation.as_ref().map_or(start, |c| c.window_start)
-            },
+            if full_history { window_start } else { start },
             today,
             fetched_at,
         );
@@ -320,9 +304,25 @@ async fn history(
             more.then_some(start)
         } else {
             if calculation.is_some() {
-                indicator_window(&mut points, start);
+                attach_indicators(&mut points);
             }
-            None
+            // Initial viewport is the requested range. Earlier pages contain up
+            // to 500 actual observations, so long gaps never produce empty pages.
+            if query.before.is_some() {
+                points.retain(|point| point.date < end);
+                let count = points.len().saturating_sub(500);
+                let more = count > 0;
+                points.drain(..count);
+                more.then(|| points[0].date)
+            } else {
+                let more = points.iter().any(|point| point.date < start);
+                points.retain(|point| point.date >= start && point.date < end);
+                if more && !points.is_empty() {
+                    Some(points[0].date)
+                } else {
+                    None
+                }
+            }
         };
         DailyHistory {
             symbol,
@@ -400,16 +400,28 @@ fn daily_points(
     points
 }
 
+#[cfg(test)]
 fn indicator_window(points: &mut Vec<DailyPoint>, start: NaiveDate) {
     attach_indicators(points);
     points.retain(|p| p.date >= start);
 }
 
-// Split before computing so recursive seeds and rolling windows cannot bridge missing sessions.
+// Only a verified exchange calendar can establish that a provider omitted a session.
+// Outside its coverage, use the observed trading dates without inventing holidays.
+fn daily_contiguous(previous: NaiveDate, current: NaiveDate) -> bool {
+    let mut date = previous + chrono::Days::new(1);
+    while date < current {
+        if holidays::covers(date.year()) && holidays::is_trading_day(date) {
+            return false;
+        }
+        date += chrono::Duration::days(1);
+    }
+    true
+}
+
+// Split at known missing sessions; unverified older dates use observed closes.
 fn attach_indicators(points: &mut [DailyPoint]) {
-    let eligible = |p: &DailyPoint| {
-        !p.provisional && holidays::covers(p.date.year()) && holidays::is_trading_day(p.date)
-    };
+    let eligible = |p: &DailyPoint| !p.provisional && holidays::is_trading_day(p.date);
     let mut remaining = points;
     while let Some((first, rest)) = remaining.split_first_mut() {
         if !eligible(first) {
@@ -420,7 +432,7 @@ fn attach_indicators(points: &mut [DailyPoint]) {
         let count = rest
             .iter()
             .take_while(|p| {
-                let consecutive = eligible(p) && holidays::next_trading_day(previous) == p.date;
+                let consecutive = eligible(p) && daily_contiguous(previous, p.date);
                 previous = p.date;
                 consecutive
             })
@@ -823,7 +835,7 @@ mod tests {
             if interval == Interval::Week1 {
                 assert_eq!(period, Period::Max);
             } else {
-                assert_eq!(period, if self.1 { Period::Y5 } else { Period::M1 });
+                assert_eq!(period, if self.1 { Period::Max } else { Period::M1 });
                 assert_eq!(interval, Interval::Day1);
             }
             let wib = idx::model::wib();
@@ -860,6 +872,15 @@ mod tests {
                                 let mut row = candle.clone();
                                 row.time = time - chrono::Days::new(week * 7);
                                 row
+                            })
+                            .collect()
+                    } else if period == Period::Max {
+                        (0..3000)
+                            .rev()
+                            .filter_map(|day| {
+                                let mut row = candle.clone();
+                                row.time = time - chrono::Days::new(day);
+                                holidays::is_trading_day(row.time.date_naive()).then_some(row)
                             })
                             .collect()
                     } else {
@@ -938,7 +959,71 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(short["data"]["calculation"], long["data"]["calculation"]);
         assert_eq!(short["data"]["calculation"]["basis"], "close");
-        assert_eq!(short["data"]["points"][0], long["data"]["points"][1]);
+        let short_points = short["data"]["points"].as_array().unwrap();
+        let long_points = long["data"]["points"].as_array().unwrap();
+        assert!(short_points[0]["indicators"]["sma200"].is_number());
+        assert_eq!(
+            short_points,
+            &long_points[long_points.len() - short_points.len()..]
+        );
+        // The first 3-year candle has enough provider history even before 2026.
+        assert!(long_points[0]["indicators"]["ema20"].is_number());
+    }
+
+    #[tokio::test]
+    async fn daily_history_pages_keep_initial_range_and_indicator_values() {
+        let app = router(Arc::new(Fixture(0.into(), true)), one_issuer(), vec![]);
+        let (status, first) = request(
+            app.clone(),
+            "/api/history?symbol=BBCA&range=3w&indicators=true",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let first = &first["data"];
+        let recent = first["points"].as_array().unwrap();
+        assert!(recent.len() <= 21);
+        let cursor = first["next_before"].as_str().unwrap();
+        assert_eq!(cursor, recent[0]["date"].as_str().unwrap());
+        let path = format!("/api/history?symbol=BBCA&range=3w&indicators=true&before={cursor}");
+        let (status, older) = request(app.clone(), &path).await;
+        assert_eq!(status, StatusCode::OK);
+        let older = &older["data"];
+        let rows = older["points"].as_array().unwrap();
+        assert_eq!(rows.len(), 500);
+        assert!(rows.last().unwrap()["date"].as_str().unwrap() < cursor);
+        assert!(rows[0]["indicators"]["sma200"].is_number());
+        let (_, long) = request(
+            app.clone(),
+            "/api/history?symbol=BBCA&range=3y&indicators=true",
+        )
+        .await;
+        let long = long["data"]["points"].as_array().unwrap();
+        for row in rows {
+            let same = long
+                .iter()
+                .find(|point| point["date"] == row["date"])
+                .unwrap();
+            assert_eq!(row, same);
+        }
+        let mut cursor = older["next_before"].as_str().map(str::to_owned);
+        let mut count = recent.len() + rows.len();
+        let mut oldest = rows[0].clone();
+        while let Some(before) = cursor {
+            let path = format!("/api/history?symbol=BBCA&range=3w&indicators=true&before={before}");
+            let (status, page) = request(app.clone(), &path).await;
+            assert_eq!(status, StatusCode::OK);
+            let data = &page["data"];
+            let points = data["points"].as_array().unwrap();
+            assert!(!points.is_empty() && points.len() <= 500);
+            assert!(points.last().unwrap()["date"].as_str().unwrap() < before.as_str());
+            oldest = points[0].clone();
+            count += points.len();
+            assert!(count <= 3000);
+            cursor = data["next_before"].as_str().map(str::to_owned);
+        }
+        assert!(count > 1500);
+        assert!(oldest["indicators"]["sma200"].is_null());
+        assert_eq!(oldest["indicators"]["observations"], 1);
     }
 
     #[tokio::test]
@@ -1009,7 +1094,7 @@ mod tests {
     }
 
     #[test]
-    fn studies_restart_after_a_missing_session_and_exclude_provisional_and_unknown_dates() {
+    fn studies_restart_after_a_verified_missing_session_and_exclude_provisional_dates() {
         let make = |day: &str, provisional| DailyPoint {
             date: day.parse().unwrap(),
             bar_time: format!("{day}T09:00:00+07:00").parse().unwrap(),
@@ -1023,6 +1108,7 @@ mod tests {
             provisional,
         };
         let mut points = [
+            make("2025-12-24", false),
             make("2025-12-30", false),
             make("2026-11-06", false),
             make("2026-11-09", false),
@@ -1033,7 +1119,7 @@ mod tests {
         attach_indicators(&mut points);
         assert_eq!(
             points.map(|p| p.indicators.map(|v| v.observations)),
-            [None, Some(1), Some(2), Some(1), None, Some(1)]
+            [Some(1), Some(2), Some(1), Some(2), Some(1), None, Some(1)]
         );
     }
 

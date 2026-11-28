@@ -20,6 +20,7 @@ test("history transforms are pure and preserve calendar gaps and absent volume",
     { date: "2026-03-02", close: 110, volume: 100 },
   ];
   assert.equal(calendarDay("2026-02-30"), null);
+  assert.equal(validHistory({ symbol: "BBCA", range: "1mo", points, next_before: "bad" }, "BBCA", "1mo"), false);
   assert.equal(validHistory({ symbol: "BBCA", range: "1mo", points }, "BBCA", "1mo"), true);
   assert.equal(validHistory({ symbol: "BBCA", range: "1mo", points: [...points].reverse() }, "BBCA", "1mo"), false);
   assert.equal(validHistory({ symbol: "BBCA", range: "1mo", points: [{ ...points[0], volume: -1 }] }, "BBCA", "1mo"), false);

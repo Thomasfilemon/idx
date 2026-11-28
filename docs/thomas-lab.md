@@ -139,23 +139,29 @@ Clone this fork with `git clone https://github.com/Thomasfilemon/idx.git`, check
 Stock Explorer requests `GET /api/history?symbol=BBCA&range=3w&indicators=true`.
 The opt-in returns prices and studies from one cached provider response, with
 the original currency, fetch time and stale flags. A client omitting the flag
-uses the existing range-specific history contract. If five-year history fails
+uses the existing range-specific history contract. If maximum daily history fails
 the explorer retries price history alone and labels the unavailable indicators.
 
-The calculation requests five years of daily observations regardless of the
-visible range. The server normalizes WIB dates, takes the latest observation
+The calculation requests the maximum available daily provider history regardless
+of the visible range. The server normalizes WIB dates, takes the latest observation
 per session, computes oldest first, then trims to the requested chart window.
 `data.calculation` specifies the version, price basis, calendar coverage, as-of
 date and window start. Identical source snapshot and session rules produce
-identical values on overlapping dates. Provider revisions or a new seed window
-can change values across fetches.
+identical values on overlapping dates. Provider revisions or changes to the earliest available observation can change
+values across fetches. The daily calculation policy is identified as
+`idx.technical.v2`. Initial results cover the selected range. When older
+observations exist, `next_before` identifies the exclusive date cursor;
+request the same symbol, range and indicators flag with `before=<cursor>`
+for up to 500 earlier daily observations. The chart prepends pages while
+preserving the visible time range and selected period.
 
 All studies use finite, positive **provider close**. Adjusted close is a
 separate historical field. A valid close without full OHLC qualifies for these
-close-based studies. Skip provisional candles, holidays and sessions outside
-the verified calendar. A missing expected trading session or invalid close
-restarts the warm-up. No interpolation or carried-forward outputs. For
-eligible points `indicators.observations` counts the continuous segment.
+close-based studies. Skip provisional candles and known non-trading days. A missing expected session
+within the verified calendar restarts the warm-up. Before the verified calendar,
+provider-reported daily observations are used as the close sequence without
+claiming exchange-calendar completeness. No interpolation or carried-forward outputs. For
+eligible points `indicators.observations` counts the continuous observed segment.
 Insufficient history yields null per study. Ineligible points omit
 `indicators`. A provisional candle on the chart can therefore have a price
 and no indicator values.

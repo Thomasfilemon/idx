@@ -51,7 +51,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       chart = createFinancialChart(host, points, mode, document.documentElement.lang, index => {
         $("history-point").value = String(index);
         showHistoryObservation();
-      }, historyData.range === "all" ? () => loadOlder() : undefined, visibleRange);
+      }, historyData.next_before ? () => loadOlder() : undefined, visibleRange);
       if (controls && historyData.calculation) chart.setIndicators(selectedIndicators());
       $("history-data").classList.add("interactive");
     } catch {
@@ -63,7 +63,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
   }
   $("history-style").addEventListener("change", event => {
     preferredMode = event.target.value === "line" ? "line" : "candlestick";
-    if (historyData) drawChart();
+    if (historyData) drawChart(chart?.visibleRange());
   });
   const historyPrice = (value, currency) => currency === "IDR" ? money(value)
     : number(value) + (currency && Number.isFinite(value) ? " " + currency : "");
@@ -131,7 +131,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       if (!historyData.calculation) reason = tr("Indikator tidak tersedia.", "Indicators unavailable.");
       else if (values.length && !row) reason = point.provisional
         ? tr("Periode sementara.", "Provisional period.")
-        : tr("Sesi di luar kalender terverifikasi.", "Session outside verified calendar.");
+        : tr("Observasi tidak memenuhi syarat.", "Observation is not eligible.");
       else if (values.length && selectedIndicators().some(key => row?.[key] == null))
         reason = number(row.observations) + (historyData.range === "all" ? tr(" minggu berurutan tersedia.", " consecutive weeks available.") : tr(" sesi berurutan tersedia.", " consecutive sessions available."));
       $("indicator-readout").textContent = [point.date, ...values, reason].filter(Boolean).join(" · ");
@@ -160,7 +160,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     historyKey = key;
     olderLoading = false;
     olderFailed = false;
-    if ($("history-older")) $("history-older").hidden = true;
+    if ($("history-older")) { $("history-older").hidden = true; $("history-older").disabled = false; }
     historyRequest?.abort();
     const request = new AbortController();
     historyRequest = request;
@@ -195,6 +195,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       if (range === "all" && data.interval !== "1wk") throw Error("Expected weekly history");
       historyData = data;
       historySource = { provider, fetched_at };
+      if ($("history-older")) setLocalizedMessage($("history-older"), () => tr("Muat histori sebelumnya", "Load earlier history"));
       if ($("history-older")) $("history-older").hidden = !data.next_before;
       geometry = historyGeometry(data.points);
       $("history-price-path").setAttribute("d", geometry.pricePath);
@@ -224,17 +225,17 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
     olderFailed = false;
     const button = $("history-older");
     button.disabled = true;
-    setLocalizedMessage(button, () => tr("Memuat minggu sebelumnya…", "Loading earlier weeks…"));
+    setLocalizedMessage(button, () => tr("Memuat histori sebelumnya…", "Loading earlier history…"));
     try {
-      const params = new URLSearchParams({ symbol: current.symbol, range: "all", before: current.next_before, indicators: "true" });
+      const params = new URLSearchParams({ symbol: current.symbol, range: current.range, before: current.next_before, indicators: String(Boolean(current.calculation)) });
       const { data, provider, fetched_at } = ensureEnvelope(await api.get("/api/history?" + params, request.signal), "idx.daily-history.v1",
-        data => validHistory(data, current.symbol, "all") && data.interval === "1wk");
+        data => validHistory(data, current.symbol, current.range) && data.interval === current.interval);
       if (request !== historyRequest) return;
       if (provider !== historySource.provider || fetched_at !== historySource.fetched_at) {
         throw Error("History snapshot changed; refresh to retrieve a consistent series");
       }
       if (data.currency !== current.currency || (data.next_before && data.next_before >= current.next_before) ||
-          data.points.some(p => p.date >= current.points[0].date)) throw Error("Inconsistent weekly page");
+          data.points.some(p => p.date >= current.points[0].date)) throw Error("Inconsistent history page");
       const visible = chart?.visibleRange();
       const points = [...data.points, ...current.points];
       historyData = { ...current, points, next_before: data.next_before };
@@ -252,7 +253,7 @@ export function createHistoryPanel({ document, api, formatting, i18n, selectedSy
       if (request === historyRequest) {
         olderLoading = false;
         button.disabled = false;
-        setLocalizedMessage(button, () => olderFailed ? tr("Coba lagi histori lama (perbarui jika gagal)", "Retry earlier history (refresh if it fails)") : tr("Muat 5 tahun sebelumnya", "Load previous 5 years"));
+        setLocalizedMessage(button, () => olderFailed ? tr("Coba lagi histori lama (perbarui jika gagal)", "Retry earlier history (refresh if it fails)") : tr("Muat histori sebelumnya", "Load earlier history"));
       }
     }
   }

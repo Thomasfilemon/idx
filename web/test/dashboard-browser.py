@@ -89,8 +89,19 @@ def smoke(browser, name, width, screenshots):
                     payload["next_before"] = "2021-11-21"
                 route.fulfill(headers=cors, json={"schema": "idx.daily-history.v1", **OPTIONS, "data": payload})
                 return
+            if range_code == "3w" and "before" in params:
+                assert params["before"] == ["2026-11-19"]
+                assert params["indicators"] == ["true"]
+                route.fulfill(headers=cors, json={"schema": "idx.daily-history.v1", **OPTIONS,
+                    "data": {"symbol": symbol, "range": "3w", "currency": "IDR",
+                             "calculation": {"method": "idx.technical.v2", "basis": "close"},
+                             "points": [{"date": "2026-10-01", "close": 3500, "volume": 1000,
+                                         "indicators": {"observations": 214, "sma20": 3500, "ema20": 3500}}]}})
+                return
             ohl = {"open": 3700, "high": 3800, "low": 3650} if range_code == "3mo" else {}
-            calculation = {"calculation": {"method": "idx.technical.v1", "basis": "close"}} if "indicators" in params else {}
+            calculation = {"calculation": {"method": "idx.technical.v2", "basis": "close"}} if "indicators" in params else {}
+            if range_code == "3w" and "indicators" in params:
+                calculation["next_before"] = "2026-11-19"
             study = {"indicators": {"observations": 215, "sma20": 3610, "rsi14": 60,
                                    "macd": {"line": 5, "signal": 2, "histogram": 3}}}
             route.fulfill(headers=cors, json={
@@ -257,6 +268,26 @@ def smoke(browser, name, width, screenshots):
     controls.get_by_label("MACD").uncheck()
     expect(page.locator("#financial-chart canvas")).to_have_count(baseline)
     expect(page.locator("#history-status")).to_contain_text("Data lama")
+    period.select_option("3w")
+    expect(page.locator("#history-older")).to_be_visible()
+    expect(page.locator("#history-dates")).to_contain_text("2026-11-19")
+    if mobile:
+        page.locator("#history-older").click()
+    else:
+        canvas = page.locator("#financial-chart canvas").first
+        expect(canvas).to_be_visible()
+        canvas.scroll_into_view_if_needed()
+        rect = canvas.bounding_box()
+        page.mouse.move(rect["x"] + rect["width"] * 0.25, rect["y"] + rect["height"] * 0.5)
+        page.mouse.down()
+        page.mouse.move(rect["x"] + rect["width"] * 0.75, rect["y"] + rect["height"] * 0.5, steps=12)
+        page.mouse.up()
+    expect(page.locator("#history-dates")).to_contain_text("2026-10-01")
+    expect(page.locator("#history-older")).to_be_hidden()
+    expect(period).to_have_value("3w")
+    assert "range=3w" in page.url
+    page.locator("#history-point").press("Home")
+    expect(page.locator("#indicator-readout")).to_contain_text("SMA20 3.500")
     period.select_option("all")
     expect(page.locator("#weekly-notice")).to_be_visible()
     page.locator("#history-style").select_option("candlestick")
